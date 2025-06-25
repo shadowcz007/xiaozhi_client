@@ -1,0 +1,48 @@
+{
+    "name": "device-activator",
+    "version": "1.0.0",
+    "description": "Node.js设备激活系统，基于小智项目的激活机制",
+    "main": "device-activator.js",
+    "scripts": {
+        "start": "node device-activator.js",
+        "test": "node test.js",
+        "test:all": "node test.js all",
+        "test:fingerprint": "node test.js fingerprint",
+        "test:hmac": "node test.js hmac",
+        "example": "node example.js",
+        "example:basic": "node example.js basic",
+        "example:fingerprint": "node example.js fingerprint",
+        "example:manual": "node example.js manual",
+        "activate": "node device-activator.js"
+    },
+    "keywords": [
+        "device",
+        "activation",
+        "iot",
+        "authentication",
+        "hmac",
+        "fingerprint"
+    ],
+    "author": "Your Name",
+    "license": "MIT",
+    "dependencies": {
+        "axios": "^1.6.0",
+        "clipboardy": "^3.0.0",
+        "open": "^9.1.0"
+    },
+    "optionalDependencies": {
+        "clipboardy": "^3.0.0",
+        "open": "^9.1.0"
+    },
+    "engines": {
+        "node": ">=14.0.0"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/your-username/device-activator.git"
+    },
+    "bugs": {
+        "url": "https://github.com/your-username/device-activator/issues"
+    },
+    "homepage": "https://github.com/your-username/device-activator#readme"
+}
