@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小智AI语音助手 - 简单示例</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        
+        .config-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+        
+        .config-section label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        .config-section input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        .buttons {
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        
+        .connect-btn {
+            background-color: #28a745;
+            color: white;
+        }
+        
+        .disconnect-btn {
+            background-color: #dc3545;
+            color: white;
+        }
+        
+        .send-btn {
+            background-color: #007bff;
+            color: white;
+        }
+        
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .chat-area {
+            height: 300px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            overflow-y: auto;
+            background: white;
+            margin: 10px 0;
+        }
+        
+        .message {
+            margin: 10px 0;
+            padding: 8px;
+            border-radius: 5px;
+        }
+        
+        .user-message {
+            background-color: #e3f2fd;
+            text-align: right;
+        }
+        
+        .ai-message {
+            background-color: #f1f8e9;
+        }
+        
+        .system-message {
+            background-color: #fff3e0;
+            font-style: italic;
+            color: #666;
+        }
+        
+        .input-area {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .input-area input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🤖 小智AI语音助手</h1>
+
+        <!-- 配置区域 -->
+        <div class="config-section">
+            <h3>连接配置</h3>
+            <label for="websocketUrl">WebSocket地址:</label>
+            <input type="text" id="websocketUrl" value="wss://ws.xiaozhi.ai" placeholder="WebSocket服务器地址">
+
+            <label for="deviceId">设备ID:</label>
+            <input type="text" id="deviceId" value="demo-device-001" placeholder="设备唯一标识">
+
+            <label for="accessToken">访问令牌 (可选):</label>
+            <input type="text" id="accessToken" value="" placeholder="访问令牌">
+        </div>
+
+        <!-- 连接状态 -->
+        <div id="status" class="status disconnected">
+            未连接
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="buttons">
+            <button id="connectBtn" class="connect-btn">连接</button>
+            <button id="disconnectBtn" class="disconnect-btn" disabled>断开连接</button>
+        </div>
+
+        <!-- 聊天区域 -->
+        <div id="chatArea" class="chat-area">
+            <div class="system-message">请先连接到服务器，然后可以发送文本消息与小智对话</div>
+        </div>
+
+        <!-- 输入区域 -->
+        <div class="input-area">
+            <input type="text" id="messageInput" placeholder="输入您的消息..." disabled>
+            <button id="sendBtn" class="send-btn" disabled>发送</button>
+        </div>
+    </div>
+
+    <script>
+        // 音频配置常量
+        const AudioConfig = {
+            INPUT_SAMPLE_RATE: 16000,
+            OUTPUT_SAMPLE_RATE: 24000,
+            CHANNELS: 1,
+            FRAME_DURATION: 60,
+            FORMAT: 'opus'
+        };
+
+        // 监听模式枚举
+        const ListeningMode = {
+            ALWAYS_ON: 'realtime',
+            AUTO_STOP: 'auto',
+            MANUAL: 'manual'
+        };
+
+        // 小智WebSocket客户端类（简化版）
+        class XiaozhiWebSocketClient {
+            constructor(config) {
+                this.websocketUrl = config.websocketUrl;
+                this.deviceId = config.deviceId;
+                this.accessToken = config.accessToken;
+
+                this.websocket = null;
+                this.connected = false;
+                this.sessionId = '';
+
+                // 事件回调
+                this.onConnected = null;
+                this.onDisconnected = null;
+                this.onError = null;
+                this.onTTSMessage = null;
+                this.onSTTMessage = null;
+            }
+
+            async connect() {
+                try {
+                    this.websocket = new WebSocket(this.websocketUrl);
+
+                    return new Promise((resolve, reject) => {
+                        const timeout = setTimeout(() => {
+                            reject(new Error('连接超时'));
+                        }, 10000);
+
+                        this.websocket.onopen = () => {
+                            clearTimeout(timeout);
+                            this._onOpen();
+                            resolve();
+                        };
+
+                        this.websocket.onmessage = this._onMessage.bind(this);
+                        this.websocket.onclose = this._onClose.bind(this);
+                        this.websocket.onerror = (error) => {
+                            clearTimeout(timeout);
+                            this._onError(error);
+                            reject(error);
+                        };
+                    });
+                } catch (error) {
+                    console.error('WebSocket连接失败:', error);
+                    if (this.onError) this.onError(error.message);
+                    throw error;
+                }
+            }
+
+            disconnect() {
+                if (this.websocket) {
+                    this.websocket.close();
+                    this.websocket = null;
+                    this.connected = false;
+                }
+            }
+
+            sendHello() {
+                const helloMessage = {
+                    type: 'hello',
+                    version: 1,
+                    transport: 'websocket',
+                    audio_params: {
+                        format: 'opus',
+                        sample_rate: 16000,
+                        channels: 1,
+                        frame_duration: 60
+                    }
+                };
+
+                this.sendTextMessage(JSON.stringify(helloMessage));
+            }
+
+            sendTextQuery(text) {
+                const message = {
+                    session_id: this.sessionId,
+                    type: 'listen',
+                    state: 'detect',
+                    text: text,
+                    source: 'text'
+                };
+
+                this.sendTextMessage(JSON.stringify(message));
+            }
+
+            sendTextMessage(message) {
+                if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                    this.websocket.send(message);
+                } else {
+                    console.error('WebSocket未连接，无法发送消息');
+                }
+            }
+
+            isConnected() {
+                return this.connected && this.websocket && this.websocket.readyState === WebSocket.OPEN;
+            }
+
+            _onOpen() {
+                console.log('WebSocket连接已建立');
+                this.connected = true;
+
+                if (this.accessToken) {
+                    this.sendTextMessage(`Authorization: Bearer ${this.accessToken}`);
+                    this.sendTextMessage(`Device-ID: ${this.deviceId}`);
+                }
+
+                setTimeout(() => {
+                    this.sendHello();
+                }, 100);
+
+                if (this.onConnected) {
+                    this.onConnected();
+                }
+            }
+
+            _onMessage(event) {
+                if (typeof event.data === 'string') {
+                    this._handleTextMessage(event.data);
+                } else {
+                    console.log('收到音频数据，长度:', event.data.byteLength);
+                }
+            }
+
+            _onClose(event) {
+                console.log('WebSocket连接已关闭:', event.code, event.reason);
+                this.connected = false;
+
+                if (this.onDisconnected) {
+                    this.onDisconnected(event);
+                }
+            }
+
+            _onError(error) {
+                console.error('WebSocket错误:', error);
+                if (this.onError) {
+                    this.onError(error);
+                }
+            }
+
+            _handleTextMessage(messageText) {
+                try {
+                    const data = JSON.parse(messageText);
+
+                    if (data.session_id) {
+                        this.sessionId = data.session_id;
+                    }
+
+                    switch (data.type) {
+                        case 'hello':
+                            console.log('收到服务器Hello消息:', data);
+                            break;
+                        case 'tts':
+                            if (this.onTTSMessage) {
+                                this.onTTSMessage(data);
+                            }
+                            break;
+                        case 'stt':
+                            if (this.onSTTMessage) {
+                                this.onSTTMessage(data);
+                            }
+                            break;
+                    }
+
+                } catch (error) {
+                    console.error('解析JSON消息失败:', error, messageText);
+                }
+            }
+        }
+
+        // 全局变量
+        let client = null;
+
+        // DOM元素
+        const statusDiv = document.getElementById('status');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const chatArea = document.getElementById('chatArea');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+
+        // 添加消息到聊天区域
+        function addMessage(content, type = 'system') {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}-message`;
+            messageDiv.textContent = content;
+            chatArea.appendChild(messageDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        // 更新连接状态
+        function updateStatus(connected) {
+            if (connected) {
+                statusDiv.textContent = '已连接';
+                statusDiv.className = 'status connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                messageInput.disabled = false;
+                sendBtn.disabled = false;
+            } else {
+                statusDiv.textContent = '未连接';
+                statusDiv.className = 'status disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                messageInput.disabled = true;
+                sendBtn.disabled = true;
+            }
+        }
+
+        // 连接按钮事件
+        connectBtn.addEventListener('click', async() => {
+            const websocketUrl = document.getElementById('websocketUrl').value;
+            const deviceId = document.getElementById('deviceId').value;
+            const accessToken = document.getElementById('accessToken').value;
+
+            if (!websocketUrl || !deviceId) {
+                alert('请填写WebSocket地址和设备ID');
+                return;
+            }
+
+            try {
+                client = new XiaozhiWebSocketClient({
+                    websocketUrl: websocketUrl,
+                    deviceId: deviceId,
+                    accessToken: accessToken
+                });
+
+                // 设置事件回调
+                client.onConnected = () => {
+                    updateStatus(true);
+                    addMessage('✅ 已连接到小智服务器', 'system');
+                };
+
+                client.onDisconnected = () => {
+                    updateStatus(false);
+                    addMessage('❌ 与服务器断开连接', 'system');
+                };
+
+                client.onError = (error) => {
+                    addMessage(`❌ 错误: ${error}`, 'system');
+                };
+
+                client.onTTSMessage = (data) => {
+                    if (data.state === 'sentence_start' && data.text) {
+                        addMessage(data.text, 'ai');
+                    }
+                };
+
+                client.onSTTMessage = (data) => {
+                    if (data.text) {
+                        addMessage(`[语音识别] ${data.text}`, 'user');
+                    }
+                };
+
+                addMessage('正在连接...', 'system');
+                await client.connect();
+
+            } catch (error) {
+                addMessage(`连接失败: ${error.message}`, 'system');
+                updateStatus(false);
+            }
+        });
+
+        // 断开连接按钮事件
+        disconnectBtn.addEventListener('click', () => {
+            if (client) {
+                client.disconnect();
+                client = null;
+            }
+        });
+
+        // 发送消息
+        function sendMessage() {
+            const text = messageInput.value.trim();
+            if (!text || !client || !client.isConnected()) {
+                return;
+            }
+
+            addMessage(text, 'user');
+            client.sendTextQuery(text);
+            messageInput.value = '';
+        }
+
+        // 发送按钮事件
+        sendBtn.addEventListener('click', sendMessage);
+
+        // 回车发送消息
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // 初始化状态
+        updateStatus(false);
+    </script>
+</body>
+
+</html>
