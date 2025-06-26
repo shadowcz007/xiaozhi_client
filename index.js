@@ -14,31 +14,20 @@ const example = new Client(
     deviceId,
     statusResponse.mqtt.client_id);
 
-// 检查命令行参数，确定是否启用麦克风录音
-const enableMicrophone = true;
+// 监听状态变化
+example.onStateChanged = (state) => {
+    console.log('当前状态:', state);
+    // 根据状态更新UI
+};
 
-if (enableMicrophone) {
-    console.log('🎤 启用麦克风录音模式');
-    console.log('💡 使用方法：对着麦克风说话，语音将被实时识别');
-    console.log('💡 测试将在30秒后自动停止');
+// 开始语音聊天（会发送hi并开启自动录音循环）
+await example.startVoiceChat();
 
-    example.start(true).catch(console.error);
+// 直接发送文字消息
+await example.sendTextMessage('今天天气怎么样？');
 
-    // 30秒后自动停止（给足够时间测试语音）
-    setTimeout(async() => {
-        console.log('\n⏰ 3秒测试时间结束，自动停止...');
-        await example.stop();
-    }, 3000);
+// 打断对话
+await example.interruptConversation();
 
-} else {
-    console.log('🧪 使用测试数据模式');
-    console.log('💡 如需测试麦克风录音，请运行：node test.js --mic');
-
-    example.start(false).catch(console.error);
-
-    // 10秒后自动停止
-    setTimeout(async() => {
-        console.log('\n⏰ 10秒后自动停止测试...');
-        await example.disconnect();
-    }, 10000);
-}
+// 停止语音聊天
+await example.stopVoiceChat();
