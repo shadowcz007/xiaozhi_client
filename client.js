@@ -1,7 +1,7 @@
-import { DeviceActivator } from './device-activator.js';
-import { WebSocketProtocol } from './websocket.js';
-import { MicrophoneOpusRecorder } from './voice.js';
-
+import { DeviceActivator } from './src/device-activator.js';
+import { WebSocketProtocol } from './src/websocket.js';
+import { MicrophoneOpusRecorder } from './src/voice.js';
+import { NodeAudioPlayer } from './src/AudioPlayer.js';
 
 const activator = new DeviceActivator();
 let deviceId = 'e7:40:56:7a:13:9f';
@@ -10,9 +10,9 @@ console.log('result', result);
 
 
 /**
- * WebSocket 协议使用示例 - 增强版，支持麦克风录音
+ * 小智客户端，支持麦克风录音
  */
-class WebSocketExample {
+class Client {
     constructor(websocketUrl, accessToken, deviceId, clientId) {
         // 使用您提供的配置信息
         const config = {
@@ -30,6 +30,9 @@ class WebSocketExample {
         this.isRecordingFromMic = false;
         // 保存录制的音频数据
         this.recordedAudioBuffers = [];
+
+        // 初始化音频播放器
+        this.audioPlayer = new NodeAudioPlayer();
     }
 
     /**
@@ -44,18 +47,22 @@ class WebSocketExample {
         // 音频通道打开
         this.protocol.on('audioChannelOpened', () => {
             console.log('🎵 音频通道已打开，可以开始发送音频数据');
+            // 聆听状态
         });
 
         // 音频通道关闭
         this.protocol.on('audioChannelClosed', () => {
             console.log('🔇 音频通道已关闭');
+            // 
         });
 
         // 接收到音频数据
         this.protocol.on('incomingAudio', (audioData) => {
             console.log(`🔊 接收到音频数据: ${audioData.length} 字节`);
-            // 在这里处理接收到的音频数据
-            // 流式播放音频             
+            // 将音频数据传递给播放器处理
+            if (this.audioPlayer && audioData.length > 0) {
+                this.audioPlayer.processAudioData(audioData);
+            }
         });
 
         // 接收到 JSON 消息
@@ -194,18 +201,12 @@ class WebSocketExample {
             if (success) {
                 console.log('✅ 连接建立成功！');
 
-                // 发送测试消息
-                await this.sendTestMessages();
 
                 if (enableMicrophone) {
                     // 等待连接稳定后启动麦克风
                     console.log('🎤 准备启动麦克风录音模式...');
-                    setTimeout(() => {
-                        this.startMicrophoneRecording();
-                    }, 1000);
-                } else {
-                    // 发送测试音频数据
-                    await this.sendTestAudio();
+                    this.startMicrophoneRecording();
+
                 }
 
             } else {
@@ -217,42 +218,6 @@ class WebSocketExample {
         }
     }
 
-    /**
-     * 发送测试消息
-     */
-    async sendTestMessages() {
-        console.log('📤 发送测试消息...');
-
-        // 发送测试 JSON 消息
-        const testMessage = {
-            type: 'test',
-            message: 'Hello from JavaScript client!',
-            timestamp: Date.now()
-        };
-
-        await this.protocol.sendText(JSON.stringify(testMessage));
-        console.log('📤 已发送测试 JSON 消息');
-    }
-
-    /**
-     * 发送测试音频数据
-     */
-    async sendTestAudio() {
-        console.log('🎵 发送测试音频数据...');
-
-        // 发送更简单的测试数据，而不是生成完整音频
-        // 实际项目中应该发送 Opus 编码的音频数据
-        const testAudioData = Buffer.from([0x01, 0x02, 0x03, 0x04]); // 简单的测试数据
-
-        console.log('🔧 使用简化的测试音频数据，避免格式不匹配');
-
-        const success = await this.protocol.sendAudio(testAudioData);
-        if (success) {
-            console.log('🎵 已发送测试音频数据');
-        } else {
-            console.error('❌ 发送音频数据失败');
-        }
-    }
 
     /**
      * 停止麦克风录音（保持 WebSocket 连接）
@@ -354,7 +319,7 @@ if (result) {
     let statusResponse = await activator.checkDeviceStatus();
     console.log('statusResponse', statusResponse);
 
-    const example = new WebSocketExample(
+    const example = new Client(
         statusResponse.websocket.url,
         statusResponse.websocket.token,
         deviceId,

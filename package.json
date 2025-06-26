@@ -30,6 +30,7 @@
         "@discordjs/opus": "^0.10.0",
         "axios": "^1.6.0",
         "node-mic": "^1.0.1",
+        "speaker": "^0.5.5",
         "ws": "^8.18.2"
     },
     "optionalDependencies": {

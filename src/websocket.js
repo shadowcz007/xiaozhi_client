@@ -80,13 +80,6 @@ class WebSocketProtocol extends EventEmitter {
      */
     async connect() {
         try {
-            console.log('正在连接到 WebSocket 服务器:', this.config.websocketUrl);
-            console.log('使用的配置:', {
-                deviceId: this.config.deviceId,
-                clientId: this.config.clientId,
-                accessToken: this.config.accessToken ? '***' + this.config.accessToken.slice(-4) : 'null'
-            });
-
             // 重置状态
             this.helloReceived = false;
             this.connected = false;
@@ -97,15 +90,12 @@ class WebSocketProtocol extends EventEmitter {
                     reject(new Error('连接超时'));
                 }, this.connectTimeout);
 
-                console.log('正在创建 WebSocket 连接，使用头部:', this.headers);
-
                 this.websocket = new WebSocket(this.config.websocketUrl, {
                     headers: this.headers
                 });
 
                 this.websocket.on('open', async() => {
                     clearTimeout(connectTimeout);
-                    console.log('WebSocket 连接已建立');
 
                     try {
                         // 发送客户端 hello 消息
@@ -121,7 +111,6 @@ class WebSocketProtocol extends EventEmitter {
                             if (this.helloReceived) {
                                 clearTimeout(helloTimeout);
                                 this.connected = true;
-                                console.log('已成功连接到 WebSocket 服务器');
                                 this.emit('connected');
                                 resolve(true);
                             } else {
@@ -137,13 +126,11 @@ class WebSocketProtocol extends EventEmitter {
                 });
 
                 this.websocket.on('message', (data) => {
-                    // console.log('收到原始消息:', data.toString());
                     this.handleMessage(data);
                 });
 
                 this.websocket.on('close', (code, reason) => {
                     clearTimeout(connectTimeout);
-                    console.log(`WebSocket 连接已关闭: ${code} - ${reason}`);
                     this.connected = false;
                     this.emit('audioChannelClosed');
                 });
@@ -180,7 +167,6 @@ class WebSocketProtocol extends EventEmitter {
         };
 
         const messageString = JSON.stringify(helloMessage);
-        console.log('发送客户端 hello 消息:', messageString);
         await this.sendText(messageString);
     }
 
@@ -190,8 +176,6 @@ class WebSocketProtocol extends EventEmitter {
      */
     handleMessage(data) {
         try {
-            console.log('处理消息，数据类型:', typeof data, 'Buffer?', Buffer.isBuffer(data));
-
             // 判断是文本消息还是二进制数据
             if (typeof data === 'string' || Buffer.isBuffer(data)) {
                 let messageStr;
@@ -199,11 +183,9 @@ class WebSocketProtocol extends EventEmitter {
                     // 尝试将 Buffer 转换为字符串
                     try {
                         messageStr = data.toString('utf8');
-                        // console.log('Buffer 转换为字符串:', messageStr);
                         // 验证是否为有效的 JSON
                         JSON.parse(messageStr);
                     } catch (jsonError) {
-                        // console.log('不是有效的 JSON，当作音频数据处理:', jsonError.message);
                         // 如果不是有效的 JSON，则当作音频数据处理
                         this.emit('incomingAudio', data);
                         return;
@@ -211,13 +193,12 @@ class WebSocketProtocol extends EventEmitter {
                 } else {
                     messageStr = data;
                 }
-
+                console.log('收到消息:', messageStr);
                 // 处理 JSON 消息
                 try {
                     const jsonData = JSON.parse(messageStr);
-                    // console.log('解析的 JSON 数据:', jsonData);
                     const msgType = jsonData.type;
-
+                    // console.log('收到消息:', msgType);
                     if (msgType === 'hello') {
                         this.handleServerHello(jsonData);
                     } else {
@@ -228,7 +209,6 @@ class WebSocketProtocol extends EventEmitter {
                     console.error('原始消息:', messageStr);
                 }
             } else {
-                console.log('未知数据类型，当作音频数据处理');
                 // 二进制音频数据
                 this.emit('incomingAudio', data);
             }
@@ -245,22 +225,21 @@ class WebSocketProtocol extends EventEmitter {
      */
     handleServerHello(data) {
         try {
-            console.log('收到服务器 hello 消息:', JSON.stringify(data, null, 2));
-
             // 验证传输方式 - 放宽验证条件
             const transport = data.transport;
             if (transport && transport !== 'websocket') {
                 console.warn('传输方式不匹配，但继续处理:', transport);
-            }
+            };
 
+            console.log('收到服务器 hello 消息:', data);
             // 设置 hello 接收状态
             this.helloReceived = true;
-            console.log('设置 helloReceived = true');
+
+            this.audio_params = data.audio_params;
+            this.session_id = data.session_id;
 
             // 通知音频通道已打开
             this.emit('audioChannelOpened');
-
-            console.log('成功处理服务器 hello 消息');
 
         } catch (error) {
             console.error('处理服务器 hello 消息时出错:', error);
@@ -299,7 +278,6 @@ class WebSocketProtocol extends EventEmitter {
         }
 
         try {
-            console.log('发送文本消息:', message);
             this.websocket.send(message);
             return true;
         } catch (error) {
@@ -341,7 +319,6 @@ class WebSocketProtocol extends EventEmitter {
                 this.websocket = null;
                 this.connected = false;
                 this.helloReceived = false;
-                console.log('音频通道已关闭');
                 this.emit('audioChannelClosed');
             } catch (error) {
                 console.error('关闭 WebSocket 连接失败:', error);
