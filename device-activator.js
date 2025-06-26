@@ -427,7 +427,13 @@ class MultiDeviceManager {
      * 创建虚拟设备
      */
     async createVirtualDevice(deviceName = null) {
-        const deviceId = `virtual_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        // 先生成临时设备ID用于生成虚拟MAC
+        const tempDeviceId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        const tempVirtualDevice = new DeviceFingerprint(tempDeviceId);
+        const virtualMac = tempVirtualDevice.generateVirtualMac();
+
+        // 直接使用虚拟MAC作为设备ID
+        const deviceId = virtualMac;
 
         // 确保设备名称唯一
         let finalDeviceName;
@@ -441,12 +447,12 @@ class MultiDeviceManager {
             }
         } else {
             // 用户没有指定名称，生成默认名称并确保唯一性
-            const defaultName = `虚拟设备_${deviceId.split('_')[1]}`;
+            const defaultName = `虚拟设备_${virtualMac.replace(/:/g, '').substring(0, 8)}`;
             finalDeviceName = await this.generateUniqueDeviceName(defaultName);
         }
 
+        // 使用虚拟MAC作为设备ID创建设备指纹实例
         const virtualDevice = new DeviceFingerprint(deviceId);
-        const virtualMac = virtualDevice.generateVirtualMac();
 
         // 创建efuse文件
         await virtualDevice.ensureEfuseFile(true, virtualMac, finalDeviceName);
@@ -725,7 +731,7 @@ class DeviceActivator {
         }
 
         const deviceInfo = await this.multiDeviceManager.getDeviceInfo(this.deviceFingerprint.deviceId);
-       
+
         const { challenge, code, message = '请在xiaozhi.me输入验证码' } = activationData;
 
         console.log('\n==================', activationData);
@@ -858,6 +864,13 @@ class DeviceActivator {
             // 检查是否已激活（除非强制激活）
             if (identity.isActivated && !forceActivation) {
                 console.log(`设备已激活，无需重复激活 (${identity.deviceId})`);
+                // let statusResponse = await this.checkDeviceStatus();
+                // if (statusResponse.mqtt || statusResponse.websocket) {
+                //     console.log('配置信息:', JSON.stringify({
+                //         mqtt: statusResponse.mqtt,
+                //         websocket: statusResponse.websocket
+                //     }, null, 2));
+                // }
                 return true;
             }
 

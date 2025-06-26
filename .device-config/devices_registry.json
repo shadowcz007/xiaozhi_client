@@ -1,16 +1,9 @@
 {
-  "virtual_1750904832000_twx0at": {
+  "e7:40:56:7a:13:9f": {
     "name": "mix",
     "type": "virtual",
-    "serial_number": "SN-1699FF30-02b5d7b05525",
-    "registered_time": "2025-06-26T02:27:12.538Z",
-    "last_used": "2025-06-26T02:27:12.538Z"
-  },
-  "virtual_1750904915224_sdfrr0": {
-    "name": "goodmate",
-    "type": "virtual",
-    "serial_number": "SN-8943BAE4-4ac9ec5596e1",
-    "registered_time": "2025-06-26T02:28:35.838Z",
-    "last_used": "2025-06-26T02:28:35.838Z"
+    "serial_number": "SN-E92AAAB9-e740567a139f",
+    "registered_time": "2025-06-26T03:52:12.469Z",
+    "last_used": "2025-06-26T03:52:12.469Z"
   }
 }
