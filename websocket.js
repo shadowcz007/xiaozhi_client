@@ -137,7 +137,7 @@ class WebSocketProtocol extends EventEmitter {
                 });
 
                 this.websocket.on('message', (data) => {
-                    console.log('收到原始消息:', data.toString());
+                    // console.log('收到原始消息:', data.toString());
                     this.handleMessage(data);
                 });
 
@@ -199,11 +199,11 @@ class WebSocketProtocol extends EventEmitter {
                     // 尝试将 Buffer 转换为字符串
                     try {
                         messageStr = data.toString('utf8');
-                        console.log('Buffer 转换为字符串:', messageStr);
+                        // console.log('Buffer 转换为字符串:', messageStr);
                         // 验证是否为有效的 JSON
                         JSON.parse(messageStr);
                     } catch (jsonError) {
-                        console.log('不是有效的 JSON，当作音频数据处理:', jsonError.message);
+                        // console.log('不是有效的 JSON，当作音频数据处理:', jsonError.message);
                         // 如果不是有效的 JSON，则当作音频数据处理
                         this.emit('incomingAudio', data);
                         return;
@@ -215,7 +215,7 @@ class WebSocketProtocol extends EventEmitter {
                 // 处理 JSON 消息
                 try {
                     const jsonData = JSON.parse(messageStr);
-                    console.log('解析的 JSON 数据:', jsonData);
+                    // console.log('解析的 JSON 数据:', jsonData);
                     const msgType = jsonData.type;
 
                     if (msgType === 'hello') {

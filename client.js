@@ -28,6 +28,8 @@ class WebSocketExample {
         // 麦克风录音器
         this.micRecorder = null;
         this.isRecordingFromMic = false;
+        // 保存录制的音频数据
+        this.recordedAudioBuffers = [];
     }
 
     /**
@@ -53,6 +55,7 @@ class WebSocketExample {
         this.protocol.on('incomingAudio', (audioData) => {
             console.log(`🔊 接收到音频数据: ${audioData.length} 字节`);
             // 在这里处理接收到的音频数据
+            // 流式播放音频             
         });
 
         // 接收到 JSON 消息
@@ -65,21 +68,34 @@ class WebSocketExample {
                 if (jsonData.session_id) {
                     console.log('🔗 会话ID:', jsonData.session_id);
                 }
-                // 这是服务器端的处理错误，通常不影响客户端功能
-                console.log('💡 提示：这可能是服务器处理测试数据时的正常错误，不影响基本连接功能');
+
+                // 分析错误类型
+                if (jsonData.message === 'Error occurred while processing message') {
+                    console.log('💡 这是服务器处理音频数据时的错误');
+                    console.log('💡 可能的原因:');
+                    console.log('   - 音频格式不正确（需要Opus编码）');
+                    console.log('   - 音频数据损坏或不完整');
+                    console.log('   - 服务器音频处理组件异常');
+                } else {
+                    console.log('💡 提示：这可能是服务器处理时的错误，不影响基本连接功能');
+                }
             }
 
             // 处理语音识别结果
             if (jsonData.type === 'stt') {
-                console.log('🎤 语音识别结果:', jsonData.text || jsonData.message);
+                console.log('🎤 用户的语音识别结果:', jsonData.text || jsonData.message);
             }
 
             // 处理语音合成消息
             if (jsonData.type === 'tts') {
-                console.log('🔊 收到语音合成消息');
+                console.log('🔊 收到xiaozhi的语音合成消息');
                 if (jsonData.text) {
                     console.log('🗣️ 合成内容:', jsonData.text);
                 }
+            }
+
+            if (jsonData.type === 'llm') {
+                console.log('🎤 llm结果:', jsonData.text, jsonData.emotion);
             }
 
             // 处理会话相关消息
@@ -116,11 +132,14 @@ class WebSocketExample {
             this.micRecorder = new MicrophoneOpusRecorder({
                 sampleRate: 16000,
                 channels: 1,
-                frameSize: 160
+                frameSize: 320 // 20ms @ 16kHz，与WebSocket协议的frame_duration保持一致
             });
 
             // 设置 Opus 数据回调
             this.micRecorder.onOpusData = (opusData) => {
+                // 保存录制的音频数据
+                this.recordedAudioBuffers.push(Buffer.from(opusData));
+
                 // 实时发送 Opus 数据到服务器
                 if (this.protocol.isAudioChannelOpened()) {
                     this.protocol.sendAudio(opusData);
@@ -157,6 +176,7 @@ class WebSocketExample {
             this.micRecorder = null;
             this.isRecordingFromMic = false;
             console.log('🔇 已停止麦克风录音');
+            console.log(`📊 总共录制了 ${this.recordedAudioBuffers.length} 个音频帧`);
         } else {
             console.log('🔇 麦克风录音未在进行中');
         }
@@ -244,9 +264,72 @@ class WebSocketExample {
         this.stopMicrophoneRecording();
         console.log('✅ 已停止麦克风录音，WebSocket 连接保持开启');
 
-        // 停止麦克风后，发送测试音频数据查看服务器响应
-        console.log('🎵 发送测试音频数据以查看服务器响应...');
-        await this.sendTestAudio();
+        // 停止麦克风后，发送录制的音频数据查看服务器响应
+        await this.sendRecordedAudio();
+    }
+
+    /**
+     * 发送录制的音频数据
+     */
+    async sendRecordedAudio() {
+        if (this.recordedAudioBuffers.length === 0) {
+            console.log('⚠️ 没有录制到音频数据');
+            return;
+        }
+
+        console.log(`🎵 发送录制的音频数据，共 ${this.recordedAudioBuffers.length} 个音频帧...`);
+
+        // 发送开始监听消息，让服务端准备接收音频进行语音识别
+        const startListeningMessage = {
+            type: 'listen',
+            state: 'start',
+            mode: 'manual' // 手动模式
+        };
+        await this.protocol.sendText(JSON.stringify(startListeningMessage));
+        console.log('📤 已发送开始监听消息');
+
+        // 等待服务器准备好接收音频
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // 逐帧发送录制的音频数据
+        console.log('📡 逐帧发送音频数据...');
+        let successCount = 0;
+
+        for (let i = 0; i < this.recordedAudioBuffers.length; i++) {
+            const audioFrame = this.recordedAudioBuffers[i];
+
+            // 每10帧打印一次进度，避免输出过多
+            if (i % 10 === 0 || i === this.recordedAudioBuffers.length - 1) {
+                console.log(`🎵 发送进度: ${i + 1}/${this.recordedAudioBuffers.length} 帧，当前帧大小: ${audioFrame.length} 字节`);
+            }
+
+            const success = await this.protocol.sendAudio(audioFrame);
+            if (success) {
+                successCount++;
+            } else {
+                console.error(`❌ 发送第 ${i + 1} 帧失败`);
+                // 继续发送其他帧，不要因为一个失败就停止
+            }
+
+            // 根据音频帧时长添加对应的延迟 (20ms 帧)
+            await new Promise(resolve => setTimeout(resolve, 20));
+        }
+
+        console.log(`📊 发送完成: 成功 ${successCount}/${this.recordedAudioBuffers.length} 帧`);
+
+        // 发送停止监听消息
+        const stopListeningMessage = {
+            type: 'listen',
+            state: 'stop'
+        };
+        await this.protocol.sendText(JSON.stringify(stopListeningMessage));
+        console.log('📤 已发送停止监听消息');
+
+        console.log('✅ 所有音频帧发送完成，等待服务器响应...');
+
+        // 清空录制的音频缓存
+        this.recordedAudioBuffers = [];
+        console.log('🗑️ 已清空音频缓存');
     }
 
     /**

@@ -9,7 +9,7 @@ class MicrophoneOpusRecorder {
     constructor(options = {}) {
         this.sampleRate = options.sampleRate || 16000; // 与小智项目保持一致
         this.channels = options.channels || 1;
-        this.frameSize = options.frameSize || 160; // 10ms @ 16kHz
+        this.frameSize = options.frameSize || 320; // 20ms @ 16kHz (与WebSocket协议保持一致)
         this.bitDepth = 16; // 16-bit PCM
 
         // 初始化 Opus 编码器
