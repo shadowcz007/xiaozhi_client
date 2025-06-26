@@ -5,9 +5,10 @@
     "main": "index.js",
     "type": "module",
     "scripts": {
-        "start": "node index.js",
-        "test": "node test.js",
-        "devices": "node devices.js --menu"
+        "start": "bun --hot index.js",
+        "test": "bun --hot test.js",
+        "devices": "bun --hot devices.js --menu",
+        "build": "bun build index.js --minify --outdir ./build"
     },
     "keywords": [
         "device",
