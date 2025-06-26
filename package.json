@@ -1,19 +1,12 @@
 {
-    "name": "device-activator",
+    "name": "xiaozhi-client",
     "version": "1.0.0",
-    "description": "Node.js设备激活系统，基于小智项目的激活机制",
-    "main": "device-activator.js",
+    "description": "Node.js小智客户端",
+    "main": "index.js",
     "type": "module",
     "scripts": {
         "start": "node index.js",
         "test": "node test.js",
-        "test:all": "node test.js all",
-        "test:fingerprint": "node test.js fingerprint",
-        "test:hmac": "node test.js hmac",
-        "example": "node example.js",
-        "example:basic": "node example.js basic",
-        "example:fingerprint": "node example.js fingerprint",
-        "example:manual": "node example.js manual",
         "devices": "node devices.js --menu"
     },
     "keywords": [
