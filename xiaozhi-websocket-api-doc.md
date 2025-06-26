@@ -1,5 +1,15 @@
 # 小智 WebSocket 通信协议 - 前端 JavaScript API 文档
 
+流程：
+OTA 服务器: https://api.tenclass.net/xiaozhi/ota/
+用于检查设备状态
+获取配置信息（MQTT/WebSocket）
+激活端点: ${otaUrl}/activate
+用于设备激活验证
+授权网址: https://xiaozhi.me/
+用户输入验证码的网页地址
+
+
 ## 概述
 
 小智AI语音助手使用WebSocket协议进行实时双向通信，支持文本消息和二进制音频数据传输。本文档提供了完整的前端JavaScript API实现。
