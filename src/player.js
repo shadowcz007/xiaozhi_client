@@ -126,7 +126,7 @@ export class NodeAudioPlayer {
 
             // 解码 Opus 数据为 PCM
             const frameSize = this.frameSize;
-            console.log(`🎵 解码音频: opusSize=${opusData.length}, frameSize=${frameSize}, sampleRate=${this.actualSampleRate || this.sampleRate}`);
+            // console.log(`🎵 解码音频: opusSize=${opusData.length}, frameSize=${frameSize}, sampleRate=${this.actualSampleRate || this.sampleRate}`);
 
             const pcmData = this.decoder.decode(opusData, frameSize);
 
@@ -135,7 +135,7 @@ export class NodeAudioPlayer {
                 return;
             }
 
-            console.log(`✅ 解码成功: PCM长度=${pcmData.length}`);
+            // console.log(`✅ 解码成功: PCM长度=${pcmData.length}`);
 
             // 检查缓冲区是否过满，防止内存积累
             if (this.audioBuffer.length >= this.maxBufferSize) {
