@@ -349,17 +349,42 @@ class DeviceFingerprint {
     /**
      * 注册设备到设备清单
      */
-    async registerDevice(deviceName, deviceType) {
+    async registerDevice(deviceName, deviceType, useVirtualMac = false, virtualMac = null) {
         const registry = await this.loadDevicesRegistry();
+        // 检查是否为虚拟设备或物理设备
+        const isVirtualDevice = deviceType === 'virtual' || useVirtualMac;
+
+        // 生成设备指纹
+        const fingerprint = await this.generateFingerprint(isVirtualDevice, virtualMac);
+
+        // 获取更详细的设备信息
+        const efuseData = await this.loadEfuseData();
+
 
         registry[this.deviceId] = {
             name: deviceName,
             type: deviceType,
             serial_number: await this.getSerialNumber(),
             registered_time: new Date().toISOString(),
-            last_used: new Date().toISOString()
+            last_used: new Date().toISOString(),
+            // 新增：存储完整的指纹信息
+            fingerprint: {
+                system: fingerprint.system,
+                hostname: fingerprint.hostname,
+                mac_address: fingerprint.mac_address,
+                mac_type: fingerprint.mac_type,
+                cpu: fingerprint.cpu,
+                system_serial: fingerprint.system_serial,
+                device_id: fingerprint.device_id,
+                is_virtual: fingerprint.is_virtual,
+                fingerprint_created_at: new Date().toISOString(),
+                // 可选：包含efuse信息的关键部分
+                activation_status: efuseData.activation_status || false,
+                device_name: efuseData.device_name || deviceName,
+                device_type: efuseData.device_type || deviceType,
+                virtual_mac: efuseData.virtual_mac || null
+            }
         };
-
         return await this.saveDevicesRegistry(registry);
     }
 
@@ -458,7 +483,7 @@ class MultiDeviceManager {
         await virtualDevice.ensureEfuseFile(true, virtualMac, finalDeviceName);
 
         // 注册设备
-        await virtualDevice.registerDevice(finalDeviceName, 'virtual');
+        await virtualDevice.registerDevice(finalDeviceName, 'virtual', true, virtualMac);
 
         const serialNumber = await virtualDevice.getSerialNumber();
         const hmacKey = await virtualDevice.getHmacKey();
@@ -864,13 +889,6 @@ class DeviceActivator {
             // 检查是否已激活（除非强制激活）
             if (identity.isActivated && !forceActivation) {
                 console.log(`设备已激活，无需重复激活 (${identity.deviceId})`);
-                // let statusResponse = await this.checkDeviceStatus();
-                // if (statusResponse.mqtt || statusResponse.websocket) {
-                //     console.log('配置信息:', JSON.stringify({
-                //         mqtt: statusResponse.mqtt,
-                //         websocket: statusResponse.websocket
-                //     }, null, 2));
-                // }
                 return true;
             }
 
@@ -946,7 +964,7 @@ class DeviceActivator {
      * 显示设备管理菜单
      */
     async showDeviceMenu() {
-        
+
         const rl = readline.createInterface({
             input: process.stdin,
             output: process.stdout
@@ -1097,53 +1115,3 @@ class DeviceActivator {
 }
 
 export { DeviceFingerprint, DeviceActivator, MultiDeviceManager };
-
-// 如果直接运行此文件，则启动激活流程
-if (
-    import.meta.url ===
-    import.meta.resolve(process.argv[1])) {
-    const args = process.argv.slice(2);
-
-    const activator = new DeviceActivator({
-        // 可以在这里自定义配置
-        // otaUrl: 'https://your-custom-server.com/ota/',
-        // authUrl: 'https://your-auth-site.com/',
-    });
-
-    // 检查命令行参数
-    if (args.includes('--menu')) {
-        // 显示设备管理菜单
-        activator.showDeviceMenu()
-            .then(() => {
-                console.log('设备管理完成');
-                process.exit(0);
-            })
-            .catch(error => {
-                console.error('设备管理异常:', error);
-                process.exit(1);
-            });
-    } else {
-        // 默认激活流程
-        const deviceId = args.find(arg => arg.startsWith('--device='))?.split('=')[1];
-        const forceActivation = args.includes('--force');
-
-        if (forceActivation) {
-            console.log('强制激活模式已启用');
-        }
-
-        activator.start(deviceId, forceActivation)
-            .then(success => {
-                if (success) {
-                    console.log('激活流程完成');
-                    process.exit(0);
-                } else {
-                    console.log('激活失败');
-                    process.exit(1);
-                }
-            })
-            .catch(error => {
-                console.error('激活流程异常:', error);
-                process.exit(1);
-            });
-    }
-}

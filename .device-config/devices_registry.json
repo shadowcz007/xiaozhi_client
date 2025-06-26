@@ -1,9 +1,29 @@
 {
-  "e7:40:56:7a:13:9f": {
+  "f2:68:cb:b2:c5:93": {
     "name": "mix",
     "type": "virtual",
-    "serial_number": "SN-E92AAAB9-e740567a139f",
-    "registered_time": "2025-06-26T03:52:12.469Z",
-    "last_used": "2025-06-26T03:52:12.469Z"
+    "serial_number": "SN-53C05F84-f268cbb2c593",
+    "registered_time": "2025-06-26T12:23:31.253Z",
+    "last_used": "2025-06-26T12:23:31.253Z",
+    "fingerprint": {
+      "system": "darwin",
+      "hostname": "shadowdeMacBook-Pro-2.local",
+      "mac_address": "f2:68:cb:b2:c5:93",
+      "mac_type": "虚拟网卡",
+      "cpu": {
+        "model": "Intel(R) Core(TM) i5-8259U CPU @ 2.30GHz",
+        "cores": 8,
+        "arch": "x64",
+        "platform": "darwin"
+      },
+      "system_serial": "C02XJ07TJHC9",
+      "device_id": "f2:68:cb:b2:c5:93",
+      "is_virtual": true,
+      "fingerprint_created_at": "2025-06-26T12:23:31.253Z",
+      "activation_status": false,
+      "device_name": "mix",
+      "device_type": "virtual",
+      "virtual_mac": "f2:68:cb:b2:c5:93"
+    }
   }
 }

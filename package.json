@@ -5,7 +5,7 @@
     "main": "device-activator.js",
     "type": "module",
     "scripts": {
-        "start": "node device-activator.js",
+        "start": "node client.js",
         "test": "node test.js",
         "test:all": "node test.js all",
         "test:fingerprint": "node test.js fingerprint",
@@ -14,7 +14,7 @@
         "example:basic": "node example.js basic",
         "example:fingerprint": "node example.js fingerprint",
         "example:manual": "node example.js manual",
-        "activate": "node device-activator.js"
+        "devices": "node devices.js --menu"
     },
     "keywords": [
         "device",

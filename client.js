@@ -4,10 +4,7 @@ import { MicrophoneOpusRecorder } from './src/voice.js';
 import { NodeAudioPlayer } from './src/AudioPlayer.js';
 
 const activator = new DeviceActivator();
-let deviceId = 'e7:40:56:7a:13:9f';
-let result = await activator.start(deviceId, false);
-console.log('result', result);
-
+let deviceId = 'f2:68:cb:b2:c5:93';
 
 /**
  * 小智客户端，支持麦克风录音
@@ -313,44 +310,42 @@ class Client {
     }
 }
 
+// await activator.start(deviceId)
 
+let statusResponse = await activator.checkDeviceStatus(deviceId);
+console.log('statusResponse', statusResponse);
 
-if (result) {
-    let statusResponse = await activator.checkDeviceStatus();
-    console.log('statusResponse', statusResponse);
+const example = new Client(
+    statusResponse.websocket.url,
+    statusResponse.websocket.token,
+    deviceId,
+    statusResponse.mqtt.client_id);
 
-    const example = new Client(
-        statusResponse.websocket.url,
-        statusResponse.websocket.token,
-        deviceId,
-        statusResponse.mqtt.client_id);
+// 检查命令行参数，确定是否启用麦克风录音
+const enableMicrophone = true;
 
-    // 检查命令行参数，确定是否启用麦克风录音
-    const enableMicrophone = process.argv.includes('--mic') || process.argv.includes('--microphone');
+if (enableMicrophone) {
+    console.log('🎤 启用麦克风录音模式');
+    console.log('💡 使用方法：对着麦克风说话，语音将被实时识别');
+    console.log('💡 测试将在30秒后自动停止');
 
-    if (enableMicrophone) {
-        console.log('🎤 启用麦克风录音模式');
-        console.log('💡 使用方法：对着麦克风说话，语音将被实时识别');
-        console.log('💡 测试将在30秒后自动停止');
+    example.start(true).catch(console.error);
 
-        example.start(true).catch(console.error);
+    // 30秒后自动停止（给足够时间测试语音）
+    setTimeout(async() => {
+        console.log('\n⏰ 3秒测试时间结束，自动停止...');
+        await example.stop();
+    }, 3000);
 
-        // 30秒后自动停止（给足够时间测试语音）
-        setTimeout(async() => {
-            console.log('\n⏰ 3秒测试时间结束，自动停止...');
-            await example.stop();
-        }, 3000);
+} else {
+    console.log('🧪 使用测试数据模式');
+    console.log('💡 如需测试麦克风录音，请运行：node test.js --mic');
 
-    } else {
-        console.log('🧪 使用测试数据模式');
-        console.log('💡 如需测试麦克风录音，请运行：node test.js --mic');
+    example.start(false).catch(console.error);
 
-        example.start(false).catch(console.error);
-
-        // 10秒后自动停止
-        setTimeout(async() => {
-            console.log('\n⏰ 10秒后自动停止测试...');
-            await example.disconnect();
-        }, 10000);
-    }
+    // 10秒后自动停止
+    setTimeout(async() => {
+        console.log('\n⏰ 10秒后自动停止测试...');
+        await example.disconnect();
+    }, 10000);
 }

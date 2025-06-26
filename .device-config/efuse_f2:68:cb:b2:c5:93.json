@@ -1,0 +1,11 @@
+{
+  "serial_number": "SN-53C05F84-f268cbb2c593",
+  "hmac_key": "a47ccc62c6cbbcf184b4fd1dd7fb008fa492709d7a23a7fc189b15a4b7d97ce1",
+  "activation_status": true,
+  "created_at": "2025-06-26T12:23:30.960Z",
+  "device_id": "f2:68:cb:b2:c5:93",
+  "device_name": "mix",
+  "device_type": "virtual",
+  "virtual_mac": "f2:68:cb:b2:c5:93",
+  "activated_at": "2025-06-26T12:24:29.804Z"
+}
