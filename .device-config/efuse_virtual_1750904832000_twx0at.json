@@ -1,0 +1,11 @@
+{
+  "serial_number": "SN-1699FF30-02b5d7b05525",
+  "hmac_key": "b312f7aa340a93404b112bc5a0063695e2befda9477586b017d3c771080b5f1a",
+  "activation_status": true,
+  "created_at": "2025-06-26T02:27:12.535Z",
+  "device_id": "virtual_1750904832000_twx0at",
+  "device_name": "mix",
+  "device_type": "virtual",
+  "virtual_mac": "02:b5:d7:b0:55:25",
+  "activated_at": "2025-06-26T02:27:34.858Z"
+}

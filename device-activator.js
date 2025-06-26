@@ -6,14 +6,16 @@ const { execSync } = require('child_process');
 const axios = require('axios');
 
 /**
- * 设备指纹收集器 - 用于生成唯一的设备标识
+ * 设备指纹收集器 - 支持多设备注册码功能
  */
 class DeviceFingerprint {
-    constructor() {
+    constructor(deviceId = 'default') {
         this.system = os.platform();
-        this.configDir = '.device-config'
-        this.fingerprintCacheFile = path.join(this.configDir, '.device_fingerprint.json');
-        this.efuseFile = path.join(this.configDir, 'efuse.json');
+        this.deviceId = deviceId;
+        this.configDir = '.device-config';
+        this.fingerprintCacheFile = path.join(this.configDir, `.device_fingerprint_${deviceId}.json`);
+        this.efuseFile = path.join(this.configDir, `efuse_${deviceId}.json`);
+        this.devicesRegistryFile = path.join(this.configDir, 'devices_registry.json');
     }
 
     /**
@@ -112,14 +114,45 @@ class DeviceFingerprint {
     }
 
     /**
+     * 生成虚拟MAC地址
+     */
+    generateVirtualMac() {
+        // 基于设备ID和一些随机性生成虚拟MAC地址
+        const baseStr = `${this.deviceId}_${Date.now()}_${Math.random()}`;
+        const hash = crypto.createHash('md5').update(baseStr).digest('hex');
+        const hexStr = hash.substring(0, 12);
+
+        // 格式化为MAC地址格式，确保第一个字节是本地管理的MAC地址
+        const macBytes = [];
+        for (let i = 0; i < 12; i += 2) {
+            macBytes.push(hexStr.substring(i, i + 2));
+        }
+
+        // 设置本地管理位（第一个字节的第二位设为1）
+        const firstByte = parseInt(macBytes[0], 16);
+        macBytes[0] = (firstByte | 0x02).toString(16).padStart(2, '0');
+
+        return macBytes.join(':');
+    }
+
+    /**
      * 生成设备指纹
      */
-    async generateFingerprint() {
+    async generateFingerprint(useVirtualMac = false, virtualMac = null) {
         // 检查缓存
         const cached = await this.loadCachedFingerprint();
-        if (cached) return cached;
+        if (cached && !useVirtualMac) return cached;
 
-        const macInfo = this.getMacAddress();
+        let macInfo;
+        if (useVirtualMac && virtualMac) {
+            macInfo = {
+                mac: virtualMac.toLowerCase(),
+                type: '虚拟网卡'
+            };
+        } else {
+            macInfo = this.getMacAddress();
+        }
+
         const cpuInfo = this.getCpuInfo();
         const systemSerial = this.getSystemSerial();
 
@@ -131,11 +164,14 @@ class DeviceFingerprint {
             cpu: cpuInfo,
             system_serial: systemSerial,
             timestamp: Date.now(),
-            mixlab_client_id: this.mixlab_client_id
+            device_id: this.deviceId,
+            is_virtual: useVirtualMac
         };
 
         // 缓存指纹
-        await this.cacheFingerprint(fingerprint);
+        if (!useVirtualMac) {
+            await this.cacheFingerprint(fingerprint);
+        }
         return fingerprint;
     }
 
@@ -158,7 +194,7 @@ class DeviceFingerprint {
         try {
             await fs.mkdir(this.configDir, { recursive: true });
             await fs.writeFile(this.fingerprintCacheFile, JSON.stringify(fingerprint, null, 2));
-            console.log('设备指纹已缓存');
+            console.log(`设备指纹已缓存 (${this.deviceId})`);
         } catch (error) {
             console.error('缓存设备指纹失败:', error.message);
         }
@@ -167,15 +203,16 @@ class DeviceFingerprint {
     /**
      * 生成硬件哈希
      */
-    async generateHardwareHash() {
-        const fingerprint = await this.generateFingerprint();
+    async generateHardwareHash(useVirtualMac = false, virtualMac = null) {
+        const fingerprint = await this.generateFingerprint(useVirtualMac, virtualMac);
 
         const identifiers = [
             fingerprint.hostname,
             fingerprint.mac_address,
             fingerprint.cpu?.model,
             fingerprint.system_serial,
-            fingerprint.system
+            fingerprint.system,
+            fingerprint.device_id
         ].filter(Boolean);
 
         const fingerprintStr = identifiers.join('||');
@@ -185,8 +222,8 @@ class DeviceFingerprint {
     /**
      * 生成设备序列号
      */
-    async generateSerialNumber() {
-        const fingerprint = await this.generateFingerprint();
+    async generateSerialNumber(useVirtualMac = false, virtualMac = null) {
+        const fingerprint = await this.generateFingerprint(useVirtualMac, virtualMac);
 
         if (fingerprint.mac_address) {
             const macClean = fingerprint.mac_address.replace(/:/g, '');
@@ -198,7 +235,7 @@ class DeviceFingerprint {
         }
 
         // 备选方案：使用硬件哈希
-        const hardwareHash = await this.generateHardwareHash();
+        const hardwareHash = await this.generateHardwareHash(useVirtualMac, virtualMac);
         return {
             serial: `SN-${hardwareHash.substring(0, 16).toUpperCase()}`,
             source: '硬件哈希值'
@@ -208,28 +245,32 @@ class DeviceFingerprint {
     /**
      * 确保efuse文件存在
      */
-    async ensureEfuseFile() {
+    async ensureEfuseFile(useVirtualMac = false, virtualMac = null, deviceName = null) {
         try {
             await fs.access(this.efuseFile);
-            console.log('efuse配置文件已存在');
+            console.log(`efuse配置文件已存在 (${this.deviceId})`);
         } catch {
             // 文件不存在，创建新的
-            const { serial, source } = await this.generateSerialNumber();
-            const hmacKey = await this.generateHardwareHash();
+            const { serial, source } = await this.generateSerialNumber(useVirtualMac, virtualMac);
+            const hmacKey = await this.generateHardwareHash(useVirtualMac, virtualMac);
 
-            console.log(`生成序列号: ${serial} (来源: ${source})`);
-            console.log(`生成HMAC密钥: ${hmacKey.substring(0, 16)}...`);
+            console.log(`生成序列号: ${serial} (来源: ${source}) (设备ID: ${this.deviceId})`);
+            console.log(`生成HMAC密钥: ${hmacKey.substring(0, 16)}... (设备ID: ${this.deviceId})`);
 
             const defaultData = {
                 serial_number: serial,
                 hmac_key: hmacKey,
                 activation_status: false,
-                created_at: new Date().toISOString()
+                created_at: new Date().toISOString(),
+                device_id: this.deviceId,
+                device_name: deviceName || (useVirtualMac ? `虚拟设备_${this.deviceId}` : `物理设备_${this.deviceId}`),
+                device_type: useVirtualMac ? 'virtual' : 'physical',
+                virtual_mac: useVirtualMac ? virtualMac : null
             };
 
             await fs.mkdir(this.configDir, { recursive: true });
             await fs.writeFile(this.efuseFile, JSON.stringify(defaultData, null, 2));
-            console.log('新设备：已创建efuse配置文件');
+            console.log(`新设备：已创建efuse配置文件 (${this.deviceId})`);
         }
     }
 
@@ -241,7 +282,7 @@ class DeviceFingerprint {
             const data = await fs.readFile(this.efuseFile, 'utf8');
             return JSON.parse(data);
         } catch (error) {
-            console.error('加载efuse数据失败:', error.message);
+            console.error(`加载efuse数据失败 (${this.deviceId}):`, error.message);
             return { serial_number: null, hmac_key: null, activation_status: false };
         }
     }
@@ -254,7 +295,7 @@ class DeviceFingerprint {
             await fs.writeFile(this.efuseFile, JSON.stringify(data, null, 2));
             return true;
         } catch (error) {
-            console.error('保存efuse数据失败:', error.message);
+            console.error(`保存efuse数据失败 (${this.deviceId}):`, error.message);
             return false;
         }
     }
@@ -304,10 +345,256 @@ class DeviceFingerprint {
 
         return crypto.createHmac('sha256', hmacKey).update(challenge).digest('hex');
     }
+
+    /**
+     * 注册设备到设备清单
+     */
+    async registerDevice(deviceName, deviceType) {
+        const registry = await this.loadDevicesRegistry();
+
+        registry[this.deviceId] = {
+            name: deviceName,
+            type: deviceType,
+            serial_number: await this.getSerialNumber(),
+            registered_time: new Date().toISOString(),
+            last_used: new Date().toISOString()
+        };
+
+        return await this.saveDevicesRegistry(registry);
+    }
+
+    /**
+     * 加载设备注册清单
+     */
+    async loadDevicesRegistry() {
+        try {
+            const data = await fs.readFile(this.devicesRegistryFile, 'utf8');
+            return JSON.parse(data);
+        } catch {
+            return {};
+        }
+    }
+
+    /**
+     * 保存设备注册清单
+     */
+    async saveDevicesRegistry(registry) {
+        try {
+            await fs.mkdir(this.configDir, { recursive: true });
+            await fs.writeFile(this.devicesRegistryFile, JSON.stringify(registry, null, 2));
+            return true;
+        } catch (error) {
+            console.error('保存设备注册清单失败:', error.message);
+            return false;
+        }
+    }
 }
 
 /**
- * 设备激活管理器
+ * 多设备管理器
+ */
+class MultiDeviceManager {
+    constructor() {
+        this.configDir = '.device-config';
+        this.devicesRegistryFile = path.join(this.configDir, 'devices_registry.json');
+        this.currentDeviceFile = path.join(this.configDir, 'current_device.json');
+    }
+
+    /**
+     * 检查设备名称是否已存在
+     */
+    async isDeviceNameExists(deviceName) {
+        const registry = await this.loadDevicesRegistry();
+        return Object.values(registry).some(device => device.name === deviceName);
+    }
+
+    /**
+     * 生成唯一的设备名称
+     */
+    async generateUniqueDeviceName(baseName) {
+        let uniqueName = baseName;
+        let counter = 1;
+
+        while (await this.isDeviceNameExists(uniqueName)) {
+            uniqueName = `${baseName}_${counter}`;
+            counter++;
+        }
+
+        return uniqueName;
+    }
+
+    /**
+     * 创建虚拟设备
+     */
+    async createVirtualDevice(deviceName = null) {
+        const deviceId = `virtual_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+        // 确保设备名称唯一
+        let finalDeviceName;
+        if (deviceName) {
+            // 用户指定了名称，需要检查唯一性
+            if (await this.isDeviceNameExists(deviceName)) {
+                finalDeviceName = await this.generateUniqueDeviceName(deviceName);
+                console.log(`设备名称 "${deviceName}" 已存在，自动调整为 "${finalDeviceName}"`);
+            } else {
+                finalDeviceName = deviceName;
+            }
+        } else {
+            // 用户没有指定名称，生成默认名称并确保唯一性
+            const defaultName = `虚拟设备_${deviceId.split('_')[1]}`;
+            finalDeviceName = await this.generateUniqueDeviceName(defaultName);
+        }
+
+        const virtualDevice = new DeviceFingerprint(deviceId);
+        const virtualMac = virtualDevice.generateVirtualMac();
+
+        // 创建efuse文件
+        await virtualDevice.ensureEfuseFile(true, virtualMac, finalDeviceName);
+
+        // 注册设备
+        await virtualDevice.registerDevice(finalDeviceName, 'virtual');
+
+        const serialNumber = await virtualDevice.getSerialNumber();
+        const hmacKey = await virtualDevice.getHmacKey();
+
+        console.log(`\n虚拟设备创建成功:`);
+        console.log(`设备ID: ${deviceId}`);
+        console.log(`设备名称: ${finalDeviceName}`);
+        console.log(`虚拟MAC: ${virtualMac}`);
+        console.log(`序列号: ${serialNumber}`);
+        console.log(`HMAC密钥: ${hmacKey.substring(0, 16)}...`);
+
+        return { deviceId, deviceName: finalDeviceName, virtualMac, serialNumber, hmacKey };
+    }
+
+    /**
+     * 列出所有设备
+     */
+    async listDevices() {
+        const registry = await this.loadDevicesRegistry();
+        return registry;
+    }
+
+    /**
+     * 删除设备
+     */
+    async deleteDevice(deviceId) {
+        try {
+            // 从注册清单中删除
+            const registry = await this.loadDevicesRegistry();
+            if (registry[deviceId]) {
+                delete registry[deviceId];
+                await this.saveDevicesRegistry(registry);
+            }
+
+            // 删除efuse文件
+            const efuseFile = path.join(this.configDir, `efuse_${deviceId}.json`);
+            try {
+                await fs.unlink(efuseFile);
+            } catch {}
+
+            // 删除指纹缓存文件
+            const fingerprintFile = path.join(this.configDir, `.device_fingerprint_${deviceId}.json`);
+            try {
+                await fs.unlink(fingerprintFile);
+            } catch {}
+
+            console.log(`设备 ${deviceId} 已删除`);
+            return true;
+        } catch (error) {
+            console.error('删除设备失败:', error.message);
+            return false;
+        }
+    }
+
+    /**
+     * 获取设备详细信息
+     */
+    async getDeviceInfo(deviceId) {
+        const registry = await this.loadDevicesRegistry();
+        if (!registry[deviceId]) {
+            return null;
+        }
+
+        const deviceInfo = {...registry[deviceId] };
+
+        // 加载efuse数据
+        const device = new DeviceFingerprint(deviceId);
+        const efuseData = await device.loadEfuseData();
+
+        return {...deviceInfo, ...efuseData };
+    }
+
+    /**
+     * 设置当前使用的设备
+     */
+    async setCurrentDevice(deviceId) {
+        const registry = await this.loadDevicesRegistry();
+        if (!registry[deviceId]) {
+            throw new Error(`设备 ${deviceId} 不存在`);
+        }
+
+        // 更新最后使用时间
+        registry[deviceId].last_used = new Date().toISOString();
+        await this.saveDevicesRegistry(registry);
+
+        // 保存当前设备
+        const currentDevice = {
+            device_id: deviceId,
+            switched_at: new Date().toISOString()
+        };
+
+        await fs.mkdir(this.configDir, { recursive: true });
+        await fs.writeFile(this.currentDeviceFile, JSON.stringify(currentDevice, null, 2));
+
+        console.log(`已切换到设备: ${registry[deviceId].name} (${deviceId})`);
+        return true;
+    }
+
+    /**
+     * 获取当前使用的设备
+     */
+    async getCurrentDevice() {
+        try {
+            const data = await fs.readFile(this.currentDeviceFile, 'utf8');
+            const currentDevice = JSON.parse(data);
+            return currentDevice.device_id;
+        } catch {
+            return 'default'; // 默认设备
+        }
+    }
+
+    /**
+     * 加载设备注册清单
+     */
+    async loadDevicesRegistry() {
+        try {
+            const registryFile = path.join(this.configDir, 'devices_registry.json');
+            const data = await fs.readFile(registryFile, 'utf8');
+            return JSON.parse(data);
+        } catch {
+            return {};
+        }
+    }
+
+    /**
+     * 保存设备注册清单
+     */
+    async saveDevicesRegistry(registry) {
+        try {
+            await fs.mkdir(this.configDir, { recursive: true });
+            const registryFile = path.join(this.configDir, 'devices_registry.json');
+            await fs.writeFile(registryFile, JSON.stringify(registry, null, 2));
+            return true;
+        } catch (error) {
+            console.error('保存设备注册清单失败:', error.message);
+            return false;
+        }
+    }
+}
+
+/**
+ * 设备激活管理器 - 支持多设备
  */
 class DeviceActivator {
     constructor(config = {}) {
@@ -321,9 +608,10 @@ class DeviceActivator {
         };
         this.mixlab_client_id = config.mixlab_client_id;
         delete this.config.mixlab_client_id;
-        console.log('config',this.config);
+        console.log('config', this.config);
 
-        this.deviceFingerprint = new DeviceFingerprint();
+        this.multiDeviceManager = new MultiDeviceManager();
+        this.deviceFingerprint = null; // 将在运行时设置
     }
 
     /**
@@ -334,32 +622,76 @@ class DeviceActivator {
     }
 
     /**
+     * 初始化设备指纹（支持多设备）
+     */
+    async initializeDeviceFingerprint(deviceId = null) {
+        if (!deviceId) {
+            deviceId = await this.multiDeviceManager.getCurrentDevice();
+        }
+
+        this.deviceFingerprint = new DeviceFingerprint(deviceId);
+        console.log(`使用设备: ${deviceId}`);
+        return deviceId;
+    }
+
+    /**
      * 确保设备身份信息
      */
-    async ensureDeviceIdentity() {
-        await this.deviceFingerprint.ensureEfuseFile();
+    async ensureDeviceIdentity(deviceId = null) {
+        const actualDeviceId = await this.initializeDeviceFingerprint(deviceId);
+
+        // 检查设备类型，确定是否为虚拟设备
+        const deviceInfo = await this.multiDeviceManager.getDeviceInfo(actualDeviceId);
+        const isVirtualDevice = deviceInfo && deviceInfo.device_type === 'virtual';
+
+        if (isVirtualDevice) {
+            // 虚拟设备：使用虚拟MAC地址
+            const virtualMac = deviceInfo.virtual_mac;
+            await this.deviceFingerprint.ensureEfuseFile(true, virtualMac, deviceInfo.name);
+        } else {
+            // 物理设备：使用默认方式
+            await this.deviceFingerprint.ensureEfuseFile();
+        }
 
         const serialNumber = await this.deviceFingerprint.getSerialNumber();
         const isActivated = await this.deviceFingerprint.isActivated();
 
-        console.log(`设备身份信息: 序列号: ${serialNumber}, 激活状态: ${isActivated ? '已激活' : '未激活'}`);
+        console.log(`设备身份信息 (${actualDeviceId}): 序列号: ${serialNumber}, 激活状态: ${isActivated ? '已激活' : '未激活'}${isVirtualDevice ? ' [虚拟设备]' : ' [物理设备]'}`);
 
-        return { serialNumber, isActivated };
+        return { deviceId: actualDeviceId, serialNumber, isActivated };
     }
 
     /**
      * 检查设备状态
      */
-    async checkDeviceStatus() {
-        const fingerprint = await this.deviceFingerprint.generateFingerprint();
+    async checkDeviceStatus(deviceId = null) {
+        if (deviceId) {
+            await this.initializeDeviceFingerprint(deviceId);
+        }
+
+        // 检查设备类型，确定是否为虚拟设备
+        const deviceInfo = await this.multiDeviceManager.getDeviceInfo(this.deviceFingerprint.deviceId);
+        const isVirtualDevice = deviceInfo && deviceInfo.device_type === 'virtual';
+
+        let fingerprint;
+        if (isVirtualDevice) {
+            // 虚拟设备：使用虚拟MAC地址生成指纹
+            const virtualMac = deviceInfo.virtual_mac;
+            fingerprint = await this.deviceFingerprint.generateFingerprint(true, virtualMac);
+        } else {
+            // 物理设备：使用默认方式
+            fingerprint = await this.deviceFingerprint.generateFingerprint();
+        }
+
         const serialNumber = await this.deviceFingerprint.getSerialNumber();
 
+        // console.log('deviceInfo', deviceInfo.name )
         const headers = {
             'Activation-Version': '2',
             'Device-Id': fingerprint.mac_address,
             'Client-Id': this.config.clientId,
             'Content-Type': 'application/json',
-            'User-Agent': 'Mixlab/1.0.0'
+            'User-Agent': deviceInfo.name + '/1.0.0'
         };
 
         const payload = {
@@ -370,11 +702,12 @@ class DeviceActivator {
             serial_number: serialNumber,
             system: fingerprint.system,
             cpu: fingerprint.cpu,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            device_id: this.deviceFingerprint.deviceId
         };
 
         try {
-            console.log('正在检查设备状态...');
+            console.log(`正在检查设备状态 (${this.deviceFingerprint.deviceId})...`);
             const response = await axios.post(this.config.otaUrl, payload, { headers });
             return response.data;
         } catch (error) {
@@ -391,12 +724,16 @@ class DeviceActivator {
             throw new Error('激活数据中缺少必要字段');
         }
 
+        const deviceInfo = await this.multiDeviceManager.getDeviceInfo(this.deviceFingerprint.deviceId);
+       
         const { challenge, code, message = '请在xiaozhi.me输入验证码' } = activationData;
 
-        console.log('\n==================',activationData);
+        console.log('\n==================', activationData);
         console.log(`激活提示: ${message}`);
-        console.log(`验证码: ${code.split('').join(' ')}`);
+        console.log(`验证码: ${code}`);
         console.log('请访问', this.config.authUrl, '输入上述验证码');
+        console.log('设备名称:', deviceInfo.name);
+        console.log(`当前设备: ${this.deviceFingerprint.deviceId}`);
         console.log('==================\n');
 
         // 复制验证码到剪贴板（如果可用）
@@ -430,7 +767,20 @@ class DeviceActivator {
         }
 
         const hmacSignature = await this.deviceFingerprint.generateHmac(challenge);
-        const fingerprint = await this.deviceFingerprint.generateFingerprint();
+
+        // 检查设备类型，确定是否为虚拟设备
+        const deviceInfo = await this.multiDeviceManager.getDeviceInfo(this.deviceFingerprint.deviceId);
+        const isVirtualDevice = deviceInfo && deviceInfo.device_type === 'virtual';
+
+        let fingerprint;
+        if (isVirtualDevice) {
+            // 虚拟设备：使用虚拟MAC地址生成指纹
+            const virtualMac = deviceInfo.virtual_mac;
+            fingerprint = await this.deviceFingerprint.generateFingerprint(true, virtualMac);
+        } else {
+            // 物理设备：使用默认方式
+            fingerprint = await this.deviceFingerprint.generateFingerprint();
+        }
 
         const payload = {
             Payload: {
@@ -450,7 +800,7 @@ class DeviceActivator {
 
         const activateUrl = this.config.otaUrl.replace(/\/$/, '') + '/activate';
 
-        console.log('开始激活设备...');
+        console.log(`开始激活设备 (${this.deviceFingerprint.deviceId})...`);
 
         for (let attempt = 1; attempt <= this.config.maxRetries; attempt++) {
             try {
@@ -465,7 +815,7 @@ class DeviceActivator {
                 console.log(JSON.stringify(response.data, null, 2));
 
                 if (response.status === 200) {
-                    console.log('\n*** 设备激活成功! ***\n');
+                    console.log(`\n*** 设备激活成功! (${this.deviceFingerprint.deviceId}) ***\n`);
                     await this.deviceFingerprint.setActivationStatus(true);
                     return true;
                 } else if (response.status === 202) {
@@ -498,41 +848,230 @@ class DeviceActivator {
     /**
      * 启动激活流程
      */
-    async start() {
+    async start(deviceId = null, forceActivation = false) {
         try {
             console.log('设备激活器启动...');
 
             // 确保设备身份
-            await this.ensureDeviceIdentity();
+            const identity = await this.ensureDeviceIdentity(deviceId);
 
-            // 检查是否已激活
-            const isActivated = await this.deviceFingerprint.isActivated();
-            if (isActivated) {
-                console.log('设备已激活，无需重复激活');
+            // 检查是否已激活（除非强制激活）
+            if (identity.isActivated && !forceActivation) {
+                console.log(`设备已激活，无需重复激活 (${identity.deviceId})`);
                 return true;
             }
 
-            // 检查设备状态
-            const statusResponse = await this.checkDeviceStatus();
+            // 对于虚拟设备或强制激活，直接请求激活流程
+            const deviceInfo = await this.multiDeviceManager.getDeviceInfo(identity.deviceId);
+            const isVirtualDevice = deviceInfo && deviceInfo.device_type === 'virtual';
+            let statusResponse;
+            if (isVirtualDevice || forceActivation || !identity.isActivated) {
+                console.log(`开始${isVirtualDevice ? '虚拟' : ''}设备激活流程 (${identity.deviceId})...`);
 
-            if (statusResponse.activation) {
-                // 需要激活
-                console.log('检测到激活请求，开始设备激活流程');
-                return await this.processActivation(statusResponse.activation);
-            } else {
-                // 已激活或其他状态
-                console.log('设备状态正常，无需激活');
-                if (statusResponse.mqtt || statusResponse.websocket) {
-                    console.log('配置信息:', JSON.stringify({
-                        mqtt: statusResponse.mqtt,
-                        websocket: statusResponse.websocket
-                    }, null, 2));
+                // 检查设备状态
+                try {
+                    statusResponse = await this.checkDeviceStatus();
+                    console.log('检查设备状态:', statusResponse);
+                } catch (error) {
+                    console.log('检查设备状态失败，直接进入激活流程:', error.message);
+                    // 如果状态检查失败，模拟一个激活请求
+                    statusResponse = {
+                        activation: {
+                            challenge: `challenge_${Date.now()}_${Math.random().toString(36).substring(2)}`,
+                            code: this.generateRandomCode(),
+                            message: '请在xiaozhi.me输入验证码完成设备激活'
+                        }
+                    };
                 }
+
+                if (statusResponse.activation) {
+                    // 需要激活
+                    console.log('检测到激活请求，开始设备激活流程');
+                    return await this.processActivation(statusResponse.activation);
+                } else {
+                    // 服务器返回无需激活的处理
+                    if (!identity.isActivated || forceActivation) {
+                        const reason = !identity.isActivated ? '本地状态为未激活' : '强制激活模式';
+                        console.log(`服务器返回无需激活，但${reason} ...`);
+                        // 生成本地激活流程
+                        return false;
+                    } else {
+                        // 已激活且服务器确认，非强制模式
+                        console.log('设备状态正常，无需激活');
+                        if (statusResponse.mqtt || statusResponse.websocket) {
+                            console.log('配置信息:', JSON.stringify({
+                                mqtt: statusResponse.mqtt,
+                                websocket: statusResponse.websocket
+                            }, null, 2));
+                        }
+                        return true;
+                    }
+                }
+            } else {
+                console.log(`设备已激活，无需重复激活 (${identity.deviceId})`);
                 return true;
             }
         } catch (error) {
             console.error('激活流程失败:', error.message);
             return false;
+        }
+    }
+
+    /**
+     * 生成随机验证码
+     */
+    generateRandomCode() {
+        const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        let result = '';
+        for (let i = 0; i < 6; i++) {
+            result += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return result;
+    }
+
+    /**
+     * 显示设备管理菜单
+     */
+    async showDeviceMenu() {
+        const readline = require('readline');
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
+
+        const question = (prompt) => new Promise(resolve => rl.question(prompt, resolve));
+
+        while (true) {
+            console.log('\n========== 多设备管理菜单 ==========');
+            console.log('1. 列出所有设备');
+            console.log('2. 创建虚拟设备');
+            console.log('3. 切换设备');
+
+            console.log('5. 激活指定设备');
+            console.log('6. 查看设备详情');
+            console.log('7. 删除设备');
+            console.log('8. 退出');
+            console.log('=====================================\n');
+
+            const choice = await question('请选择操作 (1-8): ');
+
+            try {
+                switch (choice) {
+                    case '1':
+                        await this.listAllDevices();
+                        break;
+                    case '2':
+                        await this.createVirtualDeviceInteractive(question);
+                        break;
+                    case '3':
+                        await this.switchDeviceInteractive(question);
+                        break;
+
+                    case '5':
+                        await this.activateSpecificDeviceInteractive(question);
+                        break;
+                    case '6':
+                        await this.showDeviceDetailsInteractive(question);
+                        break;
+                    case '7':
+                        await this.deleteDeviceInteractive(question);
+                        break;
+                    case '8':
+                        console.log('退出设备管理');
+                        rl.close();
+                        return;
+                    default:
+                        console.log('无效选择，请重试');
+                }
+            } catch (error) {
+                console.error('操作失败:', error.message);
+            }
+        }
+    }
+
+    /**
+     * 列出所有设备
+     */
+    async listAllDevices() {
+        const devices = await this.multiDeviceManager.listDevices();
+        const currentDeviceId = await this.multiDeviceManager.getCurrentDevice();
+
+        console.log('\n========== 设备列表 ==========');
+        if (Object.keys(devices).length === 0) {
+            console.log('暂无注册设备');
+        } else {
+            for (const [deviceId, info] of Object.entries(devices)) {
+                const status = deviceId === currentDeviceId ? ' [当前]' : '';
+                console.log(`ID: ${deviceId}${status}`);
+                console.log(`  名称: ${info.name}`);
+                console.log(`  类型: ${info.type}`);
+                console.log(`  序列号: ${info.serial_number}`);
+                console.log(`  注册时间: ${info.registered_time}`);
+                console.log(`  最后使用: ${info.last_used}`);
+                console.log('');
+            }
+        }
+        console.log('==============================\n');
+    }
+
+    /**
+     * 交互式创建虚拟设备
+     */
+    async createVirtualDeviceInteractive(question) {
+        const deviceName = await question('输入设备名称 (回车使用默认名称): ');
+        const result = await this.multiDeviceManager.createVirtualDevice(deviceName || null);
+        console.log('\n虚拟设备创建成功!');
+    }
+
+    /**
+     * 交互式切换设备
+     */
+    async switchDeviceInteractive(question) {
+        await this.listAllDevices();
+        const deviceId = await question('输入要切换的设备ID: ');
+        await this.multiDeviceManager.setCurrentDevice(deviceId);
+    }
+
+    /**
+     * 交互式激活指定设备
+     */
+    async activateSpecificDeviceInteractive(question) {
+        await this.listAllDevices();
+        const deviceId = await question('输入要激活的设备ID: ');
+        // const forceReactivation = await question('是否强制重新激活? (y/N): ');
+        // const forceActivation = forceReactivation.toLowerCase() === 'y';
+        await this.start(deviceId, true);
+    }
+
+    /**
+     * 交互式查看设备详情
+     */
+    async showDeviceDetailsInteractive(question) {
+        await this.listAllDevices();
+        const deviceId = await question('输入要查看的设备ID: ');
+        const info = await this.multiDeviceManager.getDeviceInfo(deviceId);
+
+        if (info) {
+            console.log('\n========== 设备详情 ==========');
+            console.log(JSON.stringify(info, null, 2));
+            console.log('==============================\n');
+        } else {
+            console.log('设备不存在');
+        }
+    }
+
+    /**
+     * 交互式删除设备
+     */
+    async deleteDeviceInteractive(question) {
+        await this.listAllDevices();
+        const deviceId = await question('输入要删除的设备ID: ');
+        const confirm = await question(`确认删除设备 ${deviceId}? (y/N): `);
+
+        if (confirm.toLowerCase() === 'y') {
+            await this.multiDeviceManager.deleteDevice(deviceId);
+        } else {
+            console.log('取消删除');
         }
     }
 
@@ -544,28 +1083,52 @@ class DeviceActivator {
     }
 }
 
-module.exports = { DeviceFingerprint, DeviceActivator };
+module.exports = { DeviceFingerprint, DeviceActivator, MultiDeviceManager };
 
 // 如果直接运行此文件，则启动激活流程
 if (require.main === module) {
+    const args = process.argv.slice(2);
+
     const activator = new DeviceActivator({
         // 可以在这里自定义配置
         // otaUrl: 'https://your-custom-server.com/ota/',
         // authUrl: 'https://your-auth-site.com/',
     });
 
-    activator.start()
-        .then(success => {
-            if (success) {
-                console.log('激活流程完成');
+    // 检查命令行参数
+    if (args.includes('--menu')) {
+        // 显示设备管理菜单
+        activator.showDeviceMenu()
+            .then(() => {
+                console.log('设备管理完成');
                 process.exit(0);
-            } else {
-                console.log('激活失败');
+            })
+            .catch(error => {
+                console.error('设备管理异常:', error);
                 process.exit(1);
-            }
-        })
-        .catch(error => {
-            console.error('激活流程异常:', error);
-            process.exit(1);
-        });
+            });
+    } else {
+        // 默认激活流程
+        const deviceId = args.find(arg => arg.startsWith('--device='))?.split('=')[1];
+        const forceActivation = args.includes('--force');
+
+        if (forceActivation) {
+            console.log('强制激活模式已启用');
+        }
+
+        activator.start(deviceId, forceActivation)
+            .then(success => {
+                if (success) {
+                    console.log('激活流程完成');
+                    process.exit(0);
+                } else {
+                    console.log('激活失败');
+                    process.exit(1);
+                }
+            })
+            .catch(error => {
+                console.error('激活流程异常:', error);
+                process.exit(1);
+            });
+    }
 }
