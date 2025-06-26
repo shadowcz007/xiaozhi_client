@@ -1,10 +1,10 @@
-const crypto = require('crypto');
-const fs = require('fs').promises;
-const path = require('path');
-const os = require('os');
-const { execSync } = require('child_process');
-const axios = require('axios');
-
+import crypto from 'crypto';
+import { promises as fs } from 'fs';
+import path from 'path';
+import os from 'os';
+import { execSync } from 'child_process';
+import axios from 'axios';
+import readline from 'readline';
 /**
  * 设备指纹收集器 - 支持多设备注册码功能
  */
@@ -946,7 +946,7 @@ class DeviceActivator {
      * 显示设备管理菜单
      */
     async showDeviceMenu() {
-        const readline = require('readline');
+        
         const rl = readline.createInterface({
             input: process.stdin,
             output: process.stdout
@@ -1096,10 +1096,12 @@ class DeviceActivator {
     }
 }
 
-module.exports = { DeviceFingerprint, DeviceActivator, MultiDeviceManager };
+export { DeviceFingerprint, DeviceActivator, MultiDeviceManager };
 
 // 如果直接运行此文件，则启动激活流程
-if (require.main === module) {
+if (
+    import.meta.url ===
+    import.meta.resolve(process.argv[1])) {
     const args = process.argv.slice(2);
 
     const activator = new DeviceActivator({

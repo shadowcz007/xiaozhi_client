@@ -3,6 +3,7 @@
     "version": "1.0.0",
     "description": "Node.js设备激活系统，基于小智项目的激活机制",
     "main": "device-activator.js",
+    "type": "module",
     "scripts": {
         "start": "node device-activator.js",
         "test": "node test.js",
@@ -26,7 +27,9 @@
     "author": "Your Name",
     "license": "MIT",
     "dependencies": {
+        "@discordjs/opus": "^0.10.0",
         "axios": "^1.6.0",
+        "node-mic": "^1.0.1",
         "ws": "^8.18.2"
     },
     "optionalDependencies": {

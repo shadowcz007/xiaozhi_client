@@ -1,5 +1,6 @@
-const WebSocket = require('ws');
-const EventEmitter = require('events');
+import WebSocket from 'ws';
+import { EventEmitter } from 'events';
+import crypto from 'crypto';
 
 /**
  * WebSocket 协议类 - JavaScript 版本
@@ -49,7 +50,6 @@ class WebSocketProtocol extends EventEmitter {
      * 生成设备ID
      */
     generateDeviceId() {
-        const crypto = require('crypto');
         return crypto.randomBytes(16).toString('hex');
     }
 
@@ -382,4 +382,4 @@ class WebSocketProtocol extends EventEmitter {
     }
 }
 
-module.exports = { WebSocketProtocol };
+export { WebSocketProtocol };

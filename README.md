@@ -444,3 +444,74 @@ MIT License
 - 支持HMAC签名验证
 - 支持验证码激活流程
 - 跨平台硬件指纹生成 
+
+# 小智客户端
+
+## 安装依赖
+
+### 基础依赖
+```bash
+npm install
+```
+
+### 麦克风录音功能依赖
+```bash
+npm install @discordjs/opus node-mic
+```
+
+**node-mic 会自动处理系统依赖！** 🎉
+- macOS/Windows: 自动下载并安装 SoX
+- Linux: 提示安装 ALSA 工具（如果需要）
+
+## 使用方法
+
+### 1. 测试数据模式（默认）
+```bash
+node test.js
+```
+发送测试音频数据到服务器，测试连接和基本功能。
+
+### 2. 麦克风录音模式
+```bash
+node test.js --mic
+# 或者
+node test.js --microphone
+```
+
+启用真实麦克风录音，进行语音识别：
+- 使用系统麦克风录制真实语音
+- 实时编码为 Opus 格式并发送到服务器
+- 支持实时语音识别和语音合成
+- 测试时间：30秒自动停止
+
+## 功能特性
+
+- ✅ WebSocket 连接和认证
+- ✅ 真实麦克风录音
+- ✅ Opus 音频编码
+- ✅ 实时语音识别
+- ✅ 错误处理和自动重连
+- ✅ 命令行参数控制
+
+## 故障排除
+
+### 依赖安装问题
+如果遇到依赖安装问题：
+```bash
+npm install --save @discordjs/opus node-mic
+```
+
+### 麦克风权限
+- 确保系统已授权麦克风访问权限
+- 在浏览器环境中需要 HTTPS 或 localhost
+
+### 系统要求
+- **macOS/Windows**: node-mic 会自动下载 SoX
+- **Linux**: 可能需要手动安装 ALSA 工具
+  ```bash
+  # Ubuntu/Debian
+  sudo apt-get install alsa-utils
+  
+  # CentOS/RHEL
+  sudo yum install alsa-utils
+  ``` 
