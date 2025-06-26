@@ -163,7 +163,7 @@ export class Client {
     async waitForAudioPlaybackComplete() {
         return new Promise((resolve) => {
             const checkInterval = setInterval(() => {
-                if (!this.audioPlayer.isPlaying()) {
+                if (!this.audioPlayer.isPlaying) {
                     clearInterval(checkInterval);
                     // 额外等待一点时间确保播放完全结束
                     setTimeout(resolve, 200);

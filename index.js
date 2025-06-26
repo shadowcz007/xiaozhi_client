@@ -20,14 +20,14 @@ example.onStateChanged = (state) => {
     // 根据状态更新UI
 };
 
+// 直接发送文字消息
+// await example.sendTextMessage('今天天气怎么样？');
+
 // 开始语音聊天（会发送hi并开启自动录音循环）
 await example.startVoiceChat();
 
-// 直接发送文字消息
-await example.sendTextMessage('今天天气怎么样？');
+// // 打断对话
+// await example.interruptConversation();
 
-// 打断对话
-await example.interruptConversation();
-
-// 停止语音聊天
-await example.stopVoiceChat();
+// // 停止语音聊天
+// await example.stopVoiceChat();

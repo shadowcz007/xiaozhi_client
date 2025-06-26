@@ -69,7 +69,7 @@ export class NodeAudioPlayer {
 
         this.initializeSpeaker();
         this.isPlaying = true;
-        console.log('🔊 开始音频播放');
+        // console.log('🔊 开始音频播放');
         this.flushBuffer();
     }
 
@@ -91,7 +91,8 @@ export class NodeAudioPlayer {
 
         // 如果缓冲区数据不足，暂停播放等待更多数据
         if (this.audioBuffer.length < this.minBufferThreshold && this.isPlaying) {
-            console.log('🔊 音频缓冲不足，等待更多数据...');
+            // console.log('🔊 音频缓冲不足，等待更多数据...');
+            this.isPlaying = false;
         }
     }
 
