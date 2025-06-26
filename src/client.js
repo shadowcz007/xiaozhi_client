@@ -1,15 +1,11 @@
-import { DeviceActivator } from './src/device-activator.js';
-import { WebSocketProtocol } from './src/websocket.js';
-import { MicrophoneOpusRecorder } from './src/voice.js';
-import { NodeAudioPlayer } from './src/AudioPlayer.js';
-
-const activator = new DeviceActivator();
-let deviceId = 'f2:68:cb:b2:c5:93';
+import { WebSocketProtocol } from './websocket.js';
+import { MicrophoneOpusRecorder } from './voice.js';
+import { NodeAudioPlayer } from './AudioPlayer.js';
 
 /**
  * 小智客户端，支持麦克风录音
  */
-class Client {
+export class Client {
     constructor(websocketUrl, accessToken, deviceId, clientId) {
         // 使用您提供的配置信息
         const config = {
@@ -197,24 +193,18 @@ class Client {
 
             if (success) {
                 console.log('✅ 连接建立成功！');
-
-
                 if (enableMicrophone) {
                     // 等待连接稳定后启动麦克风
                     console.log('🎤 准备启动麦克风录音模式...');
                     this.startMicrophoneRecording();
-
                 }
-
             } else {
                 console.error('❌ 连接失败');
             }
-
         } catch (error) {
             console.error('❌ 启动失败:', error);
         }
     }
-
 
     /**
      * 停止麦克风录音（保持 WebSocket 连接）
@@ -311,41 +301,3 @@ class Client {
 }
 
 // await activator.start(deviceId)
-
-let statusResponse = await activator.checkDeviceStatus(deviceId);
-console.log('statusResponse', statusResponse);
-
-const example = new Client(
-    statusResponse.websocket.url,
-    statusResponse.websocket.token,
-    deviceId,
-    statusResponse.mqtt.client_id);
-
-// 检查命令行参数，确定是否启用麦克风录音
-const enableMicrophone = true;
-
-if (enableMicrophone) {
-    console.log('🎤 启用麦克风录音模式');
-    console.log('💡 使用方法：对着麦克风说话，语音将被实时识别');
-    console.log('💡 测试将在30秒后自动停止');
-
-    example.start(true).catch(console.error);
-
-    // 30秒后自动停止（给足够时间测试语音）
-    setTimeout(async() => {
-        console.log('\n⏰ 3秒测试时间结束，自动停止...');
-        await example.stop();
-    }, 3000);
-
-} else {
-    console.log('🧪 使用测试数据模式');
-    console.log('💡 如需测试麦克风录音，请运行：node test.js --mic');
-
-    example.start(false).catch(console.error);
-
-    // 10秒后自动停止
-    setTimeout(async() => {
-        console.log('\n⏰ 10秒后自动停止测试...');
-        await example.disconnect();
-    }, 10000);
-}

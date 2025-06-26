@@ -5,7 +5,7 @@
     "main": "device-activator.js",
     "type": "module",
     "scripts": {
-        "start": "node client.js",
+        "start": "node index.js",
         "test": "node test.js",
         "test:all": "node test.js all",
         "test:fingerprint": "node test.js fingerprint",
