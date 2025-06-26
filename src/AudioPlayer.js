@@ -9,8 +9,9 @@ export class NodeAudioPlayer {
         this.speaker = null;
         this.isPlaying = false;
         this.audioBuffer = [];
-        this.bufferSize = 5; // 缓冲5帧音频再开始播放
-        this.minBufferThreshold = 2; // 最小缓冲阈值
+        this.bufferSize = 10; // 增加初始缓冲帧数：  10
+        this.minBufferThreshold = 2; // 增加最小缓冲阈值：2  
+        this.maxBufferSize = 50; // 添加最大缓冲区限制，防止内存积累
     }
 
     initializeSpeaker() {
@@ -23,7 +24,7 @@ export class NodeAudioPlayer {
             bitDepth: 16,
             sampleRate: 24000,
             signed: true,
-            highWaterMark: 1024 * 16 // 增加内部缓冲区大小
+            highWaterMark: 1024 * 32 // 增加内部缓冲区：16 -> 32
         });
 
         this.speaker.on('error', (err) => {
@@ -43,6 +44,12 @@ export class NodeAudioPlayer {
 
             if (!pcmData || pcmData.length === 0) {
                 return;
+            }
+
+            // 检查缓冲区是否过满，防止内存积累
+            if (this.audioBuffer.length >= this.maxBufferSize) {
+                console.warn('🔊 音频缓冲区过满，丢弃旧数据');
+                this.audioBuffer.shift(); // 移除最旧的数据
             }
 
             // 将音频数据添加到缓冲区
@@ -78,8 +85,11 @@ export class NodeAudioPlayer {
             return;
         }
 
-        // 批量写入缓冲的音频数据
-        while (this.audioBuffer.length > 0) {
+        // 批量写入缓冲的音频数据，但限制每次写入的数量
+        let writeCount = 0;
+        const maxWritePerFlush = 3; // 限制每次最多写入3帧，避免阻塞
+
+        while (this.audioBuffer.length > 0 && writeCount < maxWritePerFlush) {
             const pcmData = this.audioBuffer.shift();
 
             if (!this.speaker.write(pcmData)) {
@@ -87,11 +97,12 @@ export class NodeAudioPlayer {
                 this.audioBuffer.unshift(pcmData);
                 break;
             }
+            writeCount++;
         }
 
         // 如果缓冲区数据不足，暂停播放等待更多数据
         if (this.audioBuffer.length < this.minBufferThreshold && this.isPlaying) {
-            // console.log('🔊 音频缓冲不足，等待更多数据...');
+            // console.log('🔊 音频缓冲不足，等待更多数据...', `当前缓冲: ${this.audioBuffer.length}`);
             this.isPlaying = false;
         }
     }
@@ -115,5 +126,13 @@ export class NodeAudioPlayer {
             bufferSize: this.bufferSize,
             threshold: this.minBufferThreshold
         };
+    }
+
+    // 添加强制重启播放的方法
+    forceRestart() {
+        if (this.audioBuffer.length >= this.minBufferThreshold && !this.isPlaying) {
+            console.log('🔊 强制重启音频播放');
+            this.startPlayback();
+        }
     }
 }
