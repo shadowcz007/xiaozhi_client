@@ -8,7 +8,7 @@
         "start": "bun --hot index.js",
         "test": "bun --hot test.js",
         "devices": "bun --hot devices.js --menu",
-        "build": "bun build index.js --minify --outdir ./build"
+        "build": "bun build index.js --target=node --compile --minify --outfile ./build/xiaozhi  --external=shelljs"
     },
     "keywords": [
         "device",
@@ -18,13 +18,11 @@
         "hmac",
         "fingerprint"
     ],
-    "author": "Your Name",
+    "author": "shadow",
     "license": "MIT",
     "dependencies": {
-        "@discordjs/opus": "^0.10.0",
+        "audify": "^1.9.0",
         "axios": "^1.6.0",
-        "node-mic": "^1.0.1",
-        "speaker": "^0.5.5",
         "ws": "^8.18.2"
     },
     "optionalDependencies": {

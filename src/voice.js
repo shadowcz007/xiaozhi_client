@@ -1,10 +1,7 @@
 // 麦克风录音和 Opus 编码模块
-// 安装依赖：npm install @discordjs/opus node-mic
-
-import NodeMic from 'node-mic';
-import opusPkg from '@discordjs/opus';
-const { OpusEncoder } = opusPkg;
-
+// 使用 audify 库进行音频采集和编码
+import pkg from 'audify';
+const { RtAudio, RtAudioFormat, OpusEncoder, OpusApplication } = pkg;
 class MicrophoneOpusRecorder {
     constructor(options = {}) {
         this.sampleRate = options.sampleRate || 16000; // 与小智项目保持一致
@@ -12,20 +9,42 @@ class MicrophoneOpusRecorder {
         this.frameSize = options.frameSize || 320; // 20ms @ 16kHz (与WebSocket协议保持一致)
         this.bitDepth = 16; // 16-bit PCM
 
+        // 初始化 RtAudio 实例
+        this.rtAudio = new RtAudio();
+
         // 初始化 Opus 编码器
-        this.opusEncoder = new OpusEncoder(this.sampleRate, this.channels);
+        this.opusEncoder = new OpusEncoder(this.sampleRate, this.channels, OpusApplication.OPUS_APPLICATION_AUDIO);
 
         this.recording = false;
-        this.micInstance = null;
-        this.micStream = null;
-
-        // 音频缓冲区，用于帧对齐
-        this.audioBuffer = Buffer.alloc(0);
-        this.frameBytes = this.frameSize * 2; // 16-bit samples = 2 bytes per sample
+        this.streamOpened = false;
 
         // 事件回调
         this.onOpusData = null;
         this.onError = null;
+    }
+
+    /**
+     * 获取可用的音频设备列表
+     */
+    getDevices() {
+        try {
+            return this.rtAudio.getDevices();
+        } catch (error) {
+            console.error('获取设备列表失败:', error);
+            return [];
+        }
+    }
+
+    /**
+     * 获取默认输入设备
+     */
+    getDefaultInputDevice() {
+        try {
+            return this.rtAudio.getDefaultInputDevice();
+        } catch (error) {
+            console.error('获取默认输入设备失败:', error);
+            return null;
+        }
     }
 
     /**
@@ -39,76 +58,76 @@ class MicrophoneOpusRecorder {
 
         try {
             console.log('🎤 开始录音并编码为 Opus 格式...');
+
+            const defaultInputDevice = this.getDefaultInputDevice();
+            if (defaultInputDevice === null) {
+                throw new Error('未找到可用的输入设备');
+            }
+
+            console.log(`🔧 使用设备: ${defaultInputDevice} (采样率: ${this.sampleRate}Hz, 声道: ${this.channels}, 位深: ${this.bitDepth}bit)`);
+
+            // 尝试不同的采样率，如果16000不支持就尝试常见的采样率
+            const sampleRates = [this.sampleRate, 48000, 44100, 22050, 16000];
+            let actualSampleRate = this.sampleRate;
+            let streamOpened = false;
+
+            for (const testRate of sampleRates) {
+                try {
+                    // 计算对应采样率的帧大小
+                    const frameSize = Math.floor(testRate * 0.02); // 20ms
+
+                    // 打开音频流
+                    this.rtAudio.openStream(
+                        null, // 不需要输出流
+                        {
+                            deviceId: defaultInputDevice,
+                            nChannels: this.channels,
+                            firstChannel: 0
+                        },
+                        RtAudioFormat.RTAUDIO_SINT16, // 16-bit signed integer PCM
+                        testRate,
+                        frameSize, // 帧大小
+                        "XiaozhiRecorder", // 流名称
+                        (pcmData) => {
+                            if (this.recording) {
+                                this.processAudioData(pcmData, testRate, frameSize);
+                            }
+                        }
+                    );
+
+                    actualSampleRate = testRate;
+                    streamOpened = true;
+                    console.log(`✅ 成功使用采样率: ${actualSampleRate}Hz`);
+                    break;
+                } catch (err) {
+                    console.log(`⚠️ 采样率 ${testRate}Hz 不支持，尝试下一个...`);
+                    if (this.rtAudio) {
+                        try {
+                            this.rtAudio.closeStream();
+                        } catch (e) {
+                            // 忽略关闭错误
+                        }
+                    }
+                }
+            }
+
+            if (!streamOpened) {
+                throw new Error('无法找到支持的采样率');
+            }
+
+            this.streamOpened = true;
+            this.actualSampleRate = actualSampleRate;
+
+            // 开始音频流
+            this.rtAudio.start();
             this.recording = true;
 
-            // 创建麦克风实例
-            this.micInstance = new NodeMic({
-                rate: this.sampleRate,
-                channels: this.channels,
-                bitwidth: this.bitDepth,
-                encoding: 'signed-integer',
-                endian: 'little',
-                debug: false
-            });
-
-            // 获取音频流
-            this.micStream = this.micInstance.getAudioStream();
-
-            // 处理音频数据
-            this.micStream.on('data', (data) => {
-                if (this.recording) {
-                    this.processAudioData(data);
-                }
-            });
-
-            // 处理错误
-            this.micStream.on('error', (error) => {
-                console.error('麦克风流错误:', error);
-                this.recording = false;
-                if (this.onError) {
-                    this.onError(error);
-                }
-            });
-
-            // 处理开始事件
-            this.micStream.on('started', () => {
-                console.log('✅ 录音已开始，实时输出 Opus 数据');
-                console.log(`🔧 采样率: ${this.sampleRate}Hz, 声道: ${this.channels}, 位深: ${this.bitDepth}bit`);
-            });
-
-            // 处理停止事件
-            this.micStream.on('stopped', () => {
-                console.log('✅ 录音已停止');
-                this.recording = false;
-            });
-
-            // 处理暂停事件
-            this.micStream.on('paused', () => {
-                console.log('⏸️ 录音已暂停');
-            });
-
-            // 处理恢复事件
-            this.micStream.on('unpaused', () => {
-                console.log('▶️ 录音已恢复');
-            });
-
-            // 处理静音事件
-            this.micStream.on('silence', () => {
-                console.log('🔇 检测到静音');
-            });
-
-            // 处理退出事件
-            this.micStream.on('exit', (code) => {
-                console.log(`🚪 录音进程退出，代码: ${code}`);
-                this.recording = false;
-            });
-
-            // 开始录音
-            this.micInstance.start();
+            console.log('✅ 录音已开始，实时输出 Opus 数据');
 
         } catch (error) {
             console.error('启动录音失败:', error);
             this.recording = false;
+            this.streamOpened = false;
             if (this.onError) {
                 this.onError(error);
             }
@@ -116,24 +135,38 @@ class MicrophoneOpusRecorder {
     }
 
     /**
-     * 处理音频数据，进行帧对齐和 Opus 编码
+     * 处理音频数据，进行 Opus 编码
      */
-    processAudioData(data) {
+    processAudioData(pcmData, sampleRate = null, frameSize = null) {
         try {
-            // 将新数据添加到缓冲区
-            this.audioBuffer = Buffer.concat([this.audioBuffer, data]);
+            // 使用实际的采样率和帧大小
+            const actualSampleRate = sampleRate || this.actualSampleRate || this.sampleRate;
+            const actualFrameSize = frameSize || this.frameSize;
 
-            // 处理完整的音频帧
-            while (this.audioBuffer.length >= this.frameBytes) {
-                // 提取一帧数据
-                const frame = this.audioBuffer.slice(0, this.frameBytes);
-                this.audioBuffer = this.audioBuffer.slice(this.frameBytes);
+            // 如果采样率不是16000，需要进行重采样或创建新的编码器
+            if (actualSampleRate !== this.sampleRate) {
+                if (!this.resampler || this.resampler.sampleRate !== actualSampleRate) {
+                    // 创建新的编码器用于实际采样率
+                    this.resampler = {
+                        encoder: new OpusEncoder(actualSampleRate, this.channels, OpusApplication.OPUS_APPLICATION_AUDIO),
+                        sampleRate: actualSampleRate
+                    };
+                    console.log(`🔄 创建新编码器，采样率: ${actualSampleRate}Hz`);
+                }
 
-                // 编码为 Opus
-                const opusData = this.opusEncoder.encode(frame);
+                // 使用新编码器编码
+                const opusData = this.resampler.encoder.encode(pcmData, actualFrameSize);
 
                 // 触发回调
-                if (this.onOpusData) {
+                if (this.onOpusData && opusData) {
+                    this.onOpusData(opusData);
+                }
+            } else {
+                // 直接使用原编码器
+                const opusData = this.opusEncoder.encode(pcmData, actualFrameSize);
+
+                // 触发回调
+                if (this.onOpusData && opusData) {
                     this.onOpusData(opusData);
                 }
             }
@@ -159,21 +192,58 @@ class MicrophoneOpusRecorder {
             console.log('🛑 停止录音...');
             this.recording = false;
 
-            if (this.micInstance) {
-                this.micInstance.stop();
-                this.micInstance = null;
+            if (this.streamOpened) {
+                this.rtAudio.stop();
+                this.rtAudio.closeStream();
+                this.streamOpened = false;
             }
 
-            if (this.micStream) {
-                this.micStream.removeAllListeners();
-                this.micStream = null;
-            }
-
-            // 清空缓冲区
-            this.audioBuffer = Buffer.alloc(0);
+            console.log('✅ 录音已停止');
 
         } catch (error) {
             console.error('停止录音时出错:', error);
+            if (this.onError) {
+                this.onError(error);
+            }
+        }
+    }
+
+    /**
+     * 暂停录音
+     */
+    pauseRecording() {
+        if (!this.recording) {
+            console.log('录音未在进行中');
+            return;
+        }
+
+        try {
+            this.rtAudio.stop();
+            this.recording = false;
+            console.log('⏸️ 录音已暂停');
+        } catch (error) {
+            console.error('暂停录音时出错:', error);
+            if (this.onError) {
+                this.onError(error);
+            }
+        }
+    }
+
+    /**
+     * 恢复录音
+     */
+    resumeRecording() {
+        if (this.recording || !this.streamOpened) {
+            console.log('录音状态不正确，无法恢复');
+            return;
+        }
+
+        try {
+            this.rtAudio.start();
+            this.recording = true;
+            console.log('▶️ 录音已恢复');
+        } catch (error) {
+            console.error('恢复录音时出错:', error);
             if (this.onError) {
                 this.onError(error);
             }
@@ -196,9 +266,42 @@ class MicrophoneOpusRecorder {
             channels: this.channels,
             frameSize: this.frameSize,
             bitDepth: this.bitDepth,
-            frameBytes: this.frameBytes,
-            mode: 'microphone' // 标识这是真实麦克风模式
+            frameBytes: this.frameSize * 2, // 16-bit samples = 2 bytes per sample
+            mode: 'audify', // 标识这是audify模式
+            library: 'RtAudio' // 底层使用的音频库
         };
+    }
+
+    /**
+     * 获取设备信息
+     */
+    getDeviceInfo() {
+        try {
+            const devices = this.getDevices();
+            const defaultInput = this.getDefaultInputDevice();
+
+            return {
+                devices: devices,
+                defaultInputDevice: defaultInput,
+                currentDevice: defaultInput
+            };
+        } catch (error) {
+            console.error('获取设备信息失败:', error);
+            return null;
+        }
+    }
+
+    /**
+     * 清理资源
+     */
+    cleanup() {
+        this.stopRecording();
+
+        // 清理回调
+        this.onOpusData = null;
+        this.onError = null;
+
+        console.log('✅ 录音器资源已清理');
     }
 }
 

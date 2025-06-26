@@ -1,6 +1,6 @@
 import { WebSocketProtocol } from './websocket.js';
 import { MicrophoneOpusRecorder } from './voice.js';
-import { NodeAudioPlayer } from './AudioPlayer.js';
+import { NodeAudioPlayer } from './player.js';
 
 /**
  * 设备状态枚举
