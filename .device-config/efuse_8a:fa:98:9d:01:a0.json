@@ -1,0 +1,10 @@
+{
+  "serial_number": "SN-A0D22E29-8afa989d01a0",
+  "hmac_key": "97ac197214960a7beacbbe28a6a249538b9cfc0ba0d33a8dd977e84d993a58bd",
+  "activation_status": false,
+  "created_at": "2025-06-27T13:24:05.430Z",
+  "device_id": "8a:fa:98:9d:01:a0",
+  "device_name": "test",
+  "device_type": "virtual",
+  "virtual_mac": "8a:fa:98:9d:01:a0"
+}

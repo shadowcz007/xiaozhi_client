@@ -1,0 +1,11 @@
+{
+  "serial_number": "SN-F81204C7-df5234befa38",
+  "hmac_key": "3b656dcb3e263ad5391168f699851538596e3635e7496c334e9f2e65674b379e",
+  "activation_status": true,
+  "created_at": "2025-06-27T13:08:55.074Z",
+  "device_id": "df:52:34:be:fa:38",
+  "device_name": "mix",
+  "device_type": "virtual",
+  "virtual_mac": "df:52:34:be:fa:38",
+  "activated_at": "2025-06-27T13:09:09.589Z"
+}
