@@ -767,15 +767,6 @@ class DeviceActivator {
         console.log(`当前设备: ${this.deviceFingerprint.deviceId}`);
         console.log('==================\n');
 
-        // 复制验证码到剪贴板（如果可用）
-        try {
-            const clipboardy = require('clipboardy');
-            await clipboardy.write(code);
-            console.log('验证码已复制到剪贴板');
-        } catch {
-            console.log('无法复制到剪贴板，请手动复制验证码');
-        }
-
         // 尝试打开浏览器
         try {
             const open = require('open');

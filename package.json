@@ -26,7 +26,6 @@
         "ws": "^8.18.2"
     },
     "optionalDependencies": {
-        "clipboardy": "^3.0.0",
         "open": "^9.1.0"
     },
     "engines": {
