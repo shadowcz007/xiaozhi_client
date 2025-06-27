@@ -32,8 +32,9 @@ class DeviceFingerprint {
         try {
             const networkInterfaces = os.networkInterfaces();
 
-            // 优先选择以太网，然后WiFi
-            const priorityOrder = ['Ethernet', 'Wi-Fi', 'en0', 'eth0', 'wlan0'];
+            // 移除Linux网络接口名称，只保留Windows和macOS
+            const priorityOrder = ['Ethernet', 'Wi-Fi', 'en0'];
+
 
             for (const name of priorityOrder) {
                 if (networkInterfaces[name]) {
@@ -41,7 +42,7 @@ class DeviceFingerprint {
                     if (infaces) {
                         return {
                             mac: infaces.mac.toLowerCase(),
-                            type: name.includes('Wi-Fi') || name.includes('wlan') ? 'WiFi网卡' : '有线网卡'
+                            type: name.includes('Wi-Fi') ? 'WiFi网卡' : '有线网卡'
                         };
                     }
                 }
@@ -72,7 +73,7 @@ class DeviceFingerprint {
         try {
             const cpus = os.cpus();
             return {
-                model: cpus[0]?.model || 'Unknown',
+                model: (cpus[0] && cpus[0].model) || 'Unknown',
                 cores: cpus.length,
                 arch: os.arch(),
                 platform: os.platform()
@@ -93,17 +94,15 @@ class DeviceFingerprint {
             if (this.system === 'win32') {
                 serial = execSync('wmic bios get serialnumber /value', { encoding: 'utf8' })
                     .split('\n')
-                    .find(line => line.includes('SerialNumber='))?.split('=')[1]?.trim();
+                    .find(line => line.includes('SerialNumber=')) && line.split('=')[1] && line.split('=')[1].trim();
             } else if (this.system === 'darwin') {
-                serial = execSync('system_profiler SPHardwareDataType | grep "Serial Number"', { encoding: 'utf8' })
-                    .split(':')[1]?.trim();
-            } else if (this.system === 'linux') {
-                try {
-                    serial = execSync('sudo dmidecode -s system-serial-number', { encoding: 'utf8' }).trim();
-                } catch {
-                    // 如果没有sudo权限，尝试其他方法
-                    serial = execSync('cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "unknown"', { encoding: 'utf8' }).trim();
-                }
+                const output = execSync('system_profiler SPHardwareDataType | grep "Serial Number"', { encoding: 'utf8' });
+                const parts = output.split(':');
+                serial = parts[1] ? parts[1].trim() : null;
+            } else {
+                // 不支持的系统平台
+                console.warn(`不支持的系统平台: ${this.system}`);
+                return null;
             }
 
             return serial && serial !== 'unknown' ? serial : null;
@@ -159,8 +158,8 @@ class DeviceFingerprint {
         const fingerprint = {
             system: this.system,
             hostname: this.getHostname(),
-            mac_address: macInfo?.mac,
-            mac_type: macInfo?.type,
+            mac_address: (macInfo && macInfo.mac),
+            mac_type: (macInfo && macInfo.type),
             cpu: cpuInfo,
             system_serial: systemSerial,
             timestamp: Date.now(),
@@ -209,7 +208,7 @@ class DeviceFingerprint {
         const identifiers = [
             fingerprint.hostname,
             fingerprint.mac_address,
-            fingerprint.cpu?.model,
+            (fingerprint.cpu && fingerprint.cpu.model),
             fingerprint.system_serial,
             fingerprint.system,
             fingerprint.device_id
@@ -742,7 +741,7 @@ class DeviceActivator {
             const response = await axios.post(this.config.otaUrl, payload, { headers });
             return response.data;
         } catch (error) {
-            console.error('检查设备状态失败:', error.response?.data || error.message);
+            console.error('检查设备状态失败:', (error.response && error.response.data) || error.message);
             throw error;
         }
     }
@@ -766,15 +765,6 @@ class DeviceActivator {
         console.log('设备名称:', deviceInfo.name);
         console.log(`当前设备: ${this.deviceFingerprint.deviceId}`);
         console.log('==================\n');
-
-        // 尝试打开浏览器
-        try {
-            const open = require('open');
-            await open(this.config.authUrl);
-            console.log('已尝试打开浏览器');
-        } catch {
-            console.log('无法自动打开浏览器，请手动访问激活网址');
-        }
 
         return await this.activate(challenge);
     }
@@ -849,7 +839,7 @@ class DeviceActivator {
                 }
             } catch (error) {
                 if (error.response) {
-                    const errorMsg = error.response.data?.error || `HTTP ${error.response.status}`;
+                    const errorMsg = (error.response.data && error.response.data.error) || `HTTP ${error.response.status}`;
                     console.log(`\n服务器返回: ${errorMsg}，继续等待验证码激活...\n`);
 
                     if (errorMsg.includes('Device not found') && attempt % 5 === 0) {

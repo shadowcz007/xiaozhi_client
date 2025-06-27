@@ -25,9 +25,6 @@
         "axios": "^1.6.0",
         "ws": "^8.18.2"
     },
-    "optionalDependencies": {
-        "open": "^9.1.0"
-    },
     "engines": {
         "node": ">=14.0.0"
     },
