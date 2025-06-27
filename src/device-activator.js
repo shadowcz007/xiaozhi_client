@@ -15,6 +15,7 @@ class DeviceFingerprint {
         this.configDir = '.device-config';
         this.fingerprintCacheFile = path.join(this.configDir, `.device_fingerprint_${deviceId}.json`);
         this.efuseFile = path.join(this.configDir, `efuse_${deviceId}.json`);
+        this.activationDir = path.join(this.configDir, 'activation');
         this.devicesRegistryFile = path.join(this.configDir, 'devices_registry.json');
     }
 
@@ -295,6 +296,17 @@ class DeviceFingerprint {
             return true;
         } catch (error) {
             console.error(`保存efuse数据失败 (${this.deviceId}):`, error.message);
+            return false;
+        }
+    }
+
+    async saveActivationData(deviceId, data) {
+        try {
+            await fs.mkdir(this.activationDir, { recursive: true });
+            await fs.writeFile(path.join(this.activationDir, `${deviceId}.json`), JSON.stringify(data, null, 2));
+            return true;
+        } catch (error) {
+            console.error(`保存激活数据失败 (${this.deviceId}):`, error.message);
             return false;
         }
     }
@@ -738,7 +750,15 @@ class DeviceActivator {
 
         try {
             console.log(`正在检查设备状态 (${this.deviceFingerprint.deviceId})...`);
+            // console.log('##payload', payload);
+            // console.log('##headers', headers);
+
             const response = await axios.post(this.config.otaUrl, payload, { headers });
+            await this.deviceFingerprint.saveActivationData(this.deviceFingerprint.deviceId, {
+                device_id: this.deviceFingerprint.deviceId,
+                payload,
+                headers,
+            });
             return response.data;
         } catch (error) {
             console.error('检查设备状态失败:', (error.response && error.response.data) || error.message);
