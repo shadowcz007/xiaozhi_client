@@ -9,7 +9,7 @@
         "preview": "vite preview"
     },
     "dependencies": {
-        "@xiaozhi/core": "workspace:*",
+        "@xiaozhi/core": "file:../core",
         "react": "^18.2.0",
         "react-dom": "^18.2.0"
     },
