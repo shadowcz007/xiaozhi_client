@@ -14,6 +14,10 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
         this.gainNode = null;
         this.analyserNode = null;
 
+        // Buffer and scheduler
+        this.audioBufferQueue = [];
+        this.schedulerHandle = null;
+
         // 播放控制
         this.isPlaying = false;
         this.volume = options.volume || 1.0;
@@ -149,6 +153,8 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
             await this.initializeOpusDecoder();
 
             this.isPlaying = true;
+            this.scheduledTime = this.audioContext.currentTime; // 重置调度时间
+            this.playbackScheduler(); // 启动新的调度循环
             console.log('✅ Opus 播放器已启动');
 
         } catch (error) {
@@ -173,8 +179,17 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
         try {
             console.log('🛑 停止播放器...');
 
+            // 停止调度循环
+            if (this.schedulerHandle) {
+                cancelAnimationFrame(this.schedulerHandle);
+                this.schedulerHandle = null;
+            }
+
             this.isPlaying = false;
             this.ttsStopReceived = false;
+
+            // 清空缓冲区
+            this.audioBufferQueue = [];
 
             // 停止并清除所有活动的音频源
             if (this.activeSources) {
@@ -216,14 +231,12 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
      * 播放 Opus 数据
      */
     async playOpusData(opusData) {
-        if (!this.isPlaying || !this.decoder || !this.audioContext) {
-            console.warn('播放器未初始化或未启动');
+        if (!this.decoder || !this.audioContext) {
+            console.warn('播放器未初始化或未启动，无法处理音频数据');
             return;
         }
 
         try {
-            const startTime = performance.now();
-
             // 确保数据是 Uint8Array
             const opusPacket = opusData instanceof Uint8Array ? opusData : new Uint8Array(opusData);
 
@@ -255,12 +268,13 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
                 audioBuffer.getChannelData(i).set(channelData[i]);
             }
 
-            const latency = performance.now() - startTime;
-
-            this.schedulePlayback(audioBuffer, latency);
+            // 将解码后的数据推入缓冲区
+            if (audioBuffer.duration > 0) {
+                this.audioBufferQueue.push(audioBuffer);
+            }
 
         } catch (error) {
-            console.error('播放 Opus 数据失败:', error);
+            console.error('处理 Opus 数据失败:', error);
             this.stats.droppedFrames++;
             if (this.onError) {
                 this.onError(error);
@@ -313,10 +327,10 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
                 audioBuffer.getChannelData(i).set(channelData[i]);
             }
 
-            const latency = performance.now() - startTime;
-
-            // 调度播放
-            this.schedulePlayback(audioBuffer, latency);
+            // 将解码后的数据推入缓冲区
+            if (audioBuffer.duration > 0) {
+                this.audioBufferQueue.push(audioBuffer);
+            }
 
         } catch (error) {
             console.error('批量播放 Opus 数据失败:', error);
@@ -327,51 +341,46 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
     }
 
     /**
-     * 调度音频缓冲区播放
-     * @param {AudioBuffer} audioBuffer
-     * @param {number} latency 解码延迟
+     * 新的基于缓冲区的播放调度器
+     * 使用 requestAnimationFrame 以获得最佳性能
      */
-    schedulePlayback(audioBuffer, latency) {
-        // 创建播放节点
-        const sourceNode = this.audioContext.createBufferSource();
-        sourceNode.buffer = audioBuffer;
-        sourceNode.connect(this.gainNode);
+    playbackScheduler() {
+        if (!this.isPlaying) {
+            return;
+        }
 
-        // 跟踪此音频源
-        this.activeSources.add(sourceNode);
-
-        sourceNode.onended = () => {
-            // 当此音频源播放结束时，将其从跟踪集合中移除
-            this.activeSources.delete(sourceNode);
-
-            // 检查是否所有音频源都已播放完毕
-            this.checkPlaybackFinished();
-        };
-
+        // 目标：始终保持约 500ms 的音频数据在已调度状态
+        const bufferWindowSeconds = 0.5;
         const now = this.audioContext.currentTime;
-        const playTime = Math.max(now, this.scheduledTime);
 
-        if (playTime > now + 0.1) {
-            this.stats.bufferUnderruns++;
-            console.warn('⚠️ 音频缓冲区欠载，可能出现断续');
+        // 当缓冲区有数据，且已调度时间未超出当前时间+缓冲窗口时，继续调度
+        while (this.audioBufferQueue.length > 0 && this.scheduledTime < now + bufferWindowSeconds) {
+            const audioBuffer = this.audioBufferQueue.shift();
+
+            // 确定播放时间。如果调度时间已落后，则从现在开始播放，以避免追赶播放。
+            // 增加一个微小的延迟（50ms），以防止在边缘情况下出现 underrun。
+            const playTime = Math.max(now + 0.05, this.scheduledTime);
+
+            const sourceNode = this.audioContext.createBufferSource();
+            sourceNode.buffer = audioBuffer;
+            sourceNode.connect(this.gainNode);
+
+            this.activeSources.add(sourceNode);
+
+            sourceNode.onended = () => {
+                this.activeSources.delete(sourceNode);
+                this.checkPlaybackFinished();
+            };
+
+            sourceNode.start(playTime);
+
+            // 更新下一次调度时间
+            this.scheduledTime = playTime + audioBuffer.duration;
+            this.stats.totalFrames++;
         }
 
-        sourceNode.start(playTime);
-
-        const duration = audioBuffer.duration;
-        this.scheduledTime = playTime + duration;
-
-        this.stats.totalFrames++;
-        this.stats.avgLatency = (this.stats.avgLatency * (this.stats.totalFrames - 1) + latency) / this.stats.totalFrames;
-
-        if (this.onAudioData) {
-            this.onAudioData({
-                duration: duration,
-                sampleRate: audioBuffer.sampleRate,
-                channels: audioBuffer.numberOfChannels,
-                samples: audioBuffer.length
-            });
-        }
+        // 请求下一帧动画，形成循环
+        this.schedulerHandle = requestAnimationFrame(this.playbackScheduler.bind(this));
     }
 
     /**
