@@ -47,10 +47,12 @@ export class Client {
         this.audioBuffer = []; // 用于在监听状态完全就绪前缓存音频
         this.isStartingToListen = false; // 用于标记正在启动监听过程
 
-        this.onTtsStart = () => {};
-        this.onTtsStop = () => {};
-        this.onStt = () => {};
-        this.onLlm = () => {};
+        this.onTtsStart = (data) => {};
+        this.onTtsStop = (data) => {};
+        this.onTtsSentenceStart = (data) => {};
+        this.onStt = (data) => {};
+        this.onLlm = (data) => {};
+        this.onStateChanged = (state) => {};
     }
 
     /**
@@ -68,7 +70,7 @@ export class Client {
         this.audioPlayer.onPlaybackFinished = this.handlePlaybackFinished.bind(this);
 
         // 记录平台信息
-        console.log('📱 客户端平台信息:', PlatformFactory.getPlatformInfo());
+        // console.log('📱 客户端平台信息:', PlatformFactory.getPlatformInfo());
     }
 
     /**
@@ -149,11 +151,14 @@ export class Client {
             // console.log('🗣️ 开始播放AI回复');
             this.setDeviceState(DeviceState.SPEAKING);
             this.aborted = false;
+            this.onTtsStart && this.onTtsStart(data);
         } else if (state === 'stop') {
             // console.log('🔇 AI回复播放完成');
             this.handleTtsStop();
+            this.onTtsStop && this.onTtsStop(data);
         } else if (state === 'sentence_start') {
             const text = data.text;
+            this.onTtsSentenceStart && this.onTtsSentenceStart(data);
             if (text) {
                 console.log('💬 AI回复内容:', text);
             }
@@ -164,7 +169,7 @@ export class Client {
      * 处理TTS停止事件
      */
     handleTtsStop() {
-        console.log('TTS 流结束，通知播放器准备检查播放完成状态。');
+        // console.log('TTS 流结束，通知播放器准备检查播放完成状态。');
         // 当收到TTS停止消息时，我们通知播放器。
         // 播放器将负责在所有已缓冲的音频播放完毕后，调用 onPlaybackFinished。
         // 这也处理了没有收到任何音频的边缘情况（播放器会立即回调）。
@@ -186,7 +191,7 @@ export class Client {
             await this.stopListening();
 
             // 自动开启下一轮监听
-            console.log('🎤 播放完成，自动开启下一轮监听...');
+            // console.log('🎤 播放完成，自动开启下一轮监听...');
             await this.startListening(ListeningMode.AUTO_STOP);
         } else {
             // 如果不是因为被打断而停止，则将状态设置为空闲
@@ -213,7 +218,8 @@ export class Client {
     handleLlmMessage(data) {
         const emotion = data.emotion;
         if (emotion) {
-            console.log('😊 AI情感状态:', emotion);
+            // console.log('😊 AI情感状态:', emotion);
+            this.onLlm && this.onLlm(data);
         }
     }
 
@@ -305,7 +311,7 @@ export class Client {
             };
             await this.protocol.sendText(JSON.stringify(message));
 
-            console.log('🎤 麦克风已就绪，通知服务器开始监听...', message);
+            // console.log('🎤 麦克风已就绪，通知服务器开始监听...', message);
 
             // 4. 设置最终状态
             this.setDeviceState(DeviceState.LISTENING);
@@ -313,10 +319,6 @@ export class Client {
             // 5. 停止缓冲，并发送所有已缓冲的音频
             this.isStartingToListen = false;
             if (this.audioBuffer.length > 0) {
-                // console.log(`▶️ 发送 ${this.audioBuffer.length} 个已缓冲的音频包...`);
-                // for (const audioData of this.audioBuffer) {
-                //     this.protocol.sendAudio(audioData);
-                // }
                 this.audioBuffer = []; // 清空缓冲区
             }
             console.log('✅ 监听状态完全就绪，开始实时发送音频。');

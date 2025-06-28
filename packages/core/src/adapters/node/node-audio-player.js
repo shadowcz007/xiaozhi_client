@@ -80,7 +80,7 @@ export class NodeAudioPlayer extends IAudioPlayer {
             );
 
             this.streamOpened = true;
-            console.log(`🔊 音频输出流已初始化，采样率: ${this.sampleRate}Hz`);
+            // console.log(`🔊 音频输出流已初始化，采样率: ${this.sampleRate}Hz`);
 
             return true;
         } catch (error) {
@@ -245,7 +245,7 @@ export class NodeAudioPlayer extends IAudioPlayer {
                     if (this.lastBufferEmptyTime === null) {
                         // 缓冲区刚变为空，记录时间。
                         this.lastBufferEmptyTime = now;
-                        console.log('🔊 内部缓冲区已空，启动播放完成倒计时...');
+                        // console.log('🔊 内部缓冲区已空，启动播放完成倒计时...');
                     }
 
                     // 检查缓冲区持续为空的时间
@@ -258,7 +258,7 @@ export class NodeAudioPlayer extends IAudioPlayer {
                 } else {
                     // 缓冲区内有数据，重置计时器。
                     if (this.lastBufferEmptyTime !== null) {
-                        console.log('🔊 在倒计时期间收到新数据，取消播放完成。');
+                        // console.log('🔊 在倒计时期间收到新数据，取消播放完成。');
                     }
                     this.lastBufferEmptyTime = null;
                 }
@@ -302,7 +302,7 @@ export class NodeAudioPlayer extends IAudioPlayer {
         try {
             this.isPlaying = false;
             this.stopPlaybackMonitor();
-            console.log('⏸️ 音频播放已暂停');
+            // console.log('⏸️ 音频播放已暂停');
         } catch (error) {
             console.error('🔊 暂停播放失败:', error);
         }
@@ -320,7 +320,7 @@ export class NodeAudioPlayer extends IAudioPlayer {
             this.isPlaying = true;
             this.startPlaybackMonitor();
             this.flushBuffer();
-            console.log('▶️ 音频播放已恢复');
+            // console.log('▶️ 音频播放已恢复');
         } catch (error) {
             console.error('🔊 恢复播放失败:', error);
             this.isPlaying = false;
@@ -347,7 +347,7 @@ export class NodeAudioPlayer extends IAudioPlayer {
                 this.streamOpened = false;
             }
 
-            console.log('✅ 音频播放已停止');
+            // console.log('✅ 音频播放已停止');
         } catch (error) {
             console.error('🔊 停止播放失败:', error);
         }
@@ -422,7 +422,7 @@ export class NodeAudioPlayer extends IAudioPlayer {
      * 接收到TTS停止信号
      */
     signalTtsStop() {
-        console.log('🔊 NodePlayer 收到 TTS 停止信号');
+        // console.log('🔊 NodePlayer 收到 TTS 停止信号');
         this.ttsStopReceived = true;
         // 播放监控器 (playbackMonitor) 将处理所有完成逻辑
     }

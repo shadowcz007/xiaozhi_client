@@ -223,7 +223,7 @@ export class NodeWebSocketProtocol extends IWebSocketProtocol {
      * 处理服务器 hello 消息
      */
     handleServerHello(data) {
-        console.log('收到服务器 hello 响应:', data);
+        // console.log('收到服务器 hello 响应:', data);
 
         if (data.type == 'hello') {
             this.helloReceived = true;
@@ -244,7 +244,8 @@ export class NodeWebSocketProtocol extends IWebSocketProtocol {
      */
     async sendAudio(data) {
         if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
-            throw new Error('WebSocket 连接未建立');
+            console.warn('WebSocket 连接已关闭，无法发送音频数据');
+            return;
         }
 
         try {
@@ -261,7 +262,8 @@ export class NodeWebSocketProtocol extends IWebSocketProtocol {
      */
     async sendText(message) {
         if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
-            throw new Error('WebSocket 连接未建立');
+            console.warn('WebSocket 连接已关闭，无法发送文本消息:', message);
+            return;
         }
 
         try {

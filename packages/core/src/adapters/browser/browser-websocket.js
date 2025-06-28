@@ -174,7 +174,7 @@ export class BrowserWebSocket extends IWebSocketProtocol {
             this.helloReceived = true;
             this.audio_params = data.audio_params;
             this.sessionId = data.session_id;
-            console.log('收到服务器 hello 消息:', data, this);
+            // console.log('收到服务器 hello 消息:', data, this);
             // 触发 audioChannelOpened 以兼容 client.js 逻辑
             this.emit('audioChannelOpened');
 
