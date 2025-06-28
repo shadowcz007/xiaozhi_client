@@ -1,6 +1,4 @@
-import { WebSocketProtocol } from './websocket.js';
-import { MicrophoneOpusRecorder } from './voice.js';
-import { NodeAudioPlayer } from './player.js';
+import { PlatformFactory } from './platform-factory.js';
 
 /**
  * 设备状态枚举
@@ -25,33 +23,47 @@ const ListeningMode = {
  * 小智客户端，支持完整的语音聊天功能
  */
 export class Client {
-    constructor(websocketUrl, accessToken, deviceId, clientId) {
-        const config = {
+    constructor(websocketUrl, accessToken, deviceId, clientId, options = {}) {
+        this.config = {
             websocketUrl,
             accessToken,
             deviceId,
-            clientId
+            clientId,
+            ...options
         };
 
-        this.protocol = new WebSocketProtocol(config);
-        this.setupEventListeners();
+        // 组件将在 init 方法中异步初始化
+        this.protocol = null;
+        this.audioPlayer = null;
 
         // 状态管理
         this.deviceState = DeviceState.IDLE;
         this.keepListening = false;
         this.aborted = false;
 
-        // 麦克风录音器
+        // 麦克风录音器 (动态创建)
         this.micRecorder = null;
         this.isRecordingFromMic = false;
+        this.audioBuffer = []; // 用于在监听状态完全就绪前缓存音频
+        this.isStartingToListen = false; // 用于标记正在启动监听过程
+    }
+
+    /**
+     * 异步初始化客户端
+     */
+    async init() {
+        // 使用平台工厂创建适合当前环境的实现
+        this.protocol = await PlatformFactory.createWebSocketProtocol(this.config);
+        this.setupEventListeners();
 
         // 音频播放器
-        this.audioPlayer = new NodeAudioPlayer();
+        this.audioPlayer = await PlatformFactory.createAudioPlayer(this.config.audioPlayerOptions);
 
         // 添加播放完成回调
-        this.audioPlayer.onPlaybackFinished = () => {
-            this.handlePlaybackFinished();
-        };
+        this.audioPlayer.onPlaybackFinished = this.handlePlaybackFinished.bind(this);
+
+        // 记录平台信息
+        console.log('📱 客户端平台信息:', PlatformFactory.getPlatformInfo());
     }
 
     /**
@@ -66,7 +78,7 @@ export class Client {
 
         // 音频通道打开
         this.protocol.on('audioChannelOpened', () => {
-            console.log('🎵 音频通道已打开');
+            console.log('🎵 音频通道已打开', this.protocol.sessionId);
         });
 
         // 音频通道关闭
@@ -77,7 +89,9 @@ export class Client {
 
         // 接收到音频数据
         this.protocol.on('incomingAudio', (audioData) => {
-            if (this.deviceState === DeviceState.SPEAKING && audioData.length > 0) {
+            const audioSize = audioData.byteLength || audioData.length || audioData.size;
+            // console.log('🎤 接收到音频数据:', audioSize);
+            if (this.deviceState === DeviceState.SPEAKING && audioSize > 0) {
                 this.audioPlayer.processAudioData(audioData);
             }
         });
@@ -145,12 +159,33 @@ export class Client {
      * 处理TTS停止事件
      */
     async handleTtsStop() {
+        console.log('TTS 停止，等待音频播放完成...');
         // 等待音频播放完成
         await this.waitForAudioPlaybackComplete();
 
+        // if (this.keepListening && !this.aborted) {
+        //     // 自动开启下一轮监听
+        //     console.log('🎤 自动开启下一轮监听...');
+        //     await this.startListening(ListeningMode.AUTO_STOP);
+        // } else {
+        //     this.setDeviceState(DeviceState.IDLE);
+        // }
+    }
+
+    /**
+     * 处理播放完成事件
+     */
+    async handlePlaybackFinished() {
+        if (this.audioPlayer) {
+            this.audioPlayer.stop();
+        }
+
         if (this.keepListening && !this.aborted) {
+            // 先停止当前录音
+            await this.stopListening();
+
             // 自动开启下一轮监听
-            console.log('🎤 自动开启下一轮监听...');
+            console.log('🎤 播放完成，自动开启下一轮监听...');
             await this.startListening(ListeningMode.AUTO_STOP);
         } else {
             this.setDeviceState(DeviceState.IDLE);
@@ -206,6 +241,25 @@ export class Client {
     }
 
     /**
+     * 发送音频数据，包含缓冲逻辑
+     * @param {ArrayBuffer} audioData - PCM 或 Opus 音频数据
+     */
+    sendAudio(audioData) {
+        const isAudioChannelOpen = this.protocol.isAudioChannelOpened();
+        const isListening = this.deviceState === DeviceState.LISTENING;
+
+        if (isAudioChannelOpen) {
+            if (isListening) {
+                // 状态就绪，直接发送
+                this.protocol.sendAudio(audioData);
+            } else if (this.isStartingToListen) {
+                // 正在启动，先缓冲
+                this.audioBuffer.push(audioData);
+            }
+        }
+    }
+
+    /**
      * 发送文字消息（模拟唤醒词检测）
      */
     async sendTextMessage(text) {
@@ -232,25 +286,56 @@ export class Client {
      * 开始监听
      */
     async startListening(mode = ListeningMode.MANUAL) {
-        const modeMap = {
-            [ListeningMode.ALWAYS_ON]: 'realtime',
-            [ListeningMode.AUTO_STOP]: 'auto',
-            [ListeningMode.MANUAL]: 'manual'
-        };
+        if (this.isRecordingFromMic) {
+            console.warn('🎤 录音器已在运行，无法再次启动');
+            return;
+        }
 
-        const message = {
-            session_id: this.protocol.sessionId || '',
-            type: 'listen',
-            state: 'start',
-            mode: modeMap[mode]
-        };
+        // 设置启动标志并清空缓冲区
+        this.isStartingToListen = true;
+        this.audioBuffer = [];
 
-        await this.protocol.sendText(JSON.stringify(message));
-        this.setDeviceState(DeviceState.LISTENING);
+        // 1. 启动麦克风录音，此时 onOpusData 会开始缓冲音频
+        await this.startMicrophoneRecording();
 
-        // 启动麦克风录音
-        if (!this.isRecordingFromMic) {
-            await this.startMicrophoneRecording();
+        // 2. 检查录音是否成功启动
+        if (this.isRecordingFromMic) {
+
+            // 3. 发送 "listen:start" 消息
+            const modeMap = {
+                [ListeningMode.ALWAYS_ON]: 'realtime',
+                [ListeningMode.AUTO_STOP]: 'auto',
+                [ListeningMode.MANUAL]: 'manual'
+            };
+            const message = {
+                session_id: this.protocol.sessionId || '',
+                type: 'listen',
+                state: 'start',
+                mode: modeMap[mode]
+            };
+            await this.protocol.sendText(JSON.stringify(message));
+
+            console.log('🎤 麦克风已就绪，通知服务器开始监听...', message);
+
+            // 4. 设置最终状态
+            this.setDeviceState(DeviceState.LISTENING);
+
+            // 5. 停止缓冲，并发送所有已缓冲的音频
+            this.isStartingToListen = false;
+            if (this.audioBuffer.length > 0) {
+                // console.log(`▶️ 发送 ${this.audioBuffer.length} 个已缓冲的音频包...`);
+                // for (const audioData of this.audioBuffer) {
+                //     this.protocol.sendAudio(audioData);
+                // }
+                this.audioBuffer = []; // 清空缓冲区
+            }
+            console.log('✅ 监听状态完全就绪，开始实时发送音频。');
+
+        } else {
+            // 如果麦克风启动失败，重置状态
+            this.isStartingToListen = false;
+            this.audioBuffer = [];
+            console.warn('⚠️ 麦克风启动失败，监听流程中止。');
         }
     }
 
@@ -258,63 +343,84 @@ export class Client {
      * 停止监听
      */
     async stopListening() {
+        // 即使没有在录音，也要确保发送停止消息和设置状态
         const message = {
             session_id: this.protocol.sessionId || '',
             type: 'listen',
             state: 'stop'
         };
 
+        // 停止麦克风录音
+        await this.stopMicrophoneRecording();
+
         await this.protocol.sendText(JSON.stringify(message));
-        this.stopMicrophoneRecording();
         this.setDeviceState(DeviceState.IDLE);
     }
 
     /**
-     * 启动麦克风录音
+     * 开始从麦克风录音
      */
     async startMicrophoneRecording() {
+        if (this.isRecordingFromMic) return;
+
+        console.log('🎤 准备启动麦克风录音...');
         try {
-            if (this.isRecordingFromMic) {
-                return;
+            // 使用平台工厂创建录音机实例
+            this.micRecorder = await PlatformFactory.createAudioRecorder(this.config.audioRecorderOptions);
+
+            // 设置数据回调
+            const useOpus = this.config.audioRecorderOptions && this.config.audioRecorderOptions.useOpus;
+            if (useOpus) {
+                // Node.js 环境或明确使用 Opus 的浏览器
+                this.micRecorder.onOpusData = (opusData) => {
+                    this.sendAudio(opusData);
+                };
+            } else {
+                // 浏览器环境发送 PCM
+                this.micRecorder.onPcmData = (pcmData) => {
+                    this.sendAudio(pcmData);
+                };
             }
 
-            console.log('🎤 启动麦克风录音...');
 
-            this.micRecorder = new MicrophoneOpusRecorder({
-                sampleRate: 16000,
-                channels: 1,
-                frameSize: 320
-            });
-
-            this.micRecorder.onOpusData = (opusData) => {
-                if (this.protocol.isAudioChannelOpened() && this.deviceState === DeviceState.LISTENING) {
-                    this.protocol.sendAudio(opusData);
-                }
-            };
-
+            // 设置错误回调
             this.micRecorder.onError = (error) => {
                 console.error('❌ 麦克风录音错误:', error);
-                this.stopMicrophoneRecording();
+                this.stopListening(); // 录音出错时停止监听
             };
 
-            this.micRecorder.startRecording();
+            await this.micRecorder.startRecording();
             this.isRecordingFromMic = true;
-            console.log('🎤 麦克风录音已启动');
+            console.log('✅ 麦克风录音已启动');
 
         } catch (error) {
             console.error('❌ 启动麦克风录音失败:', error);
+            throw error;
         }
     }
 
     /**
      * 停止麦克风录音
      */
-    stopMicrophoneRecording() {
-        if (this.micRecorder && this.isRecordingFromMic) {
-            this.micRecorder.stopRecording();
-            this.micRecorder = null;
+    async stopMicrophoneRecording() {
+        if (!this.isRecordingFromMic) {
+            return; // Nothing to do
+        }
+
+        if (this.micRecorder) {
+            try {
+                await this.micRecorder.stopRecording();
+                this.micRecorder.cleanup();
+            } catch (error) {
+                console.error('停止录音器时出错:', error);
+            } finally {
+                this.micRecorder = null;
+                this.isRecordingFromMic = false;
+                console.log('🎤 停止麦克风录音');
+            }
+        } else {
+            // just in case micRecorder is null but isRecordingFromMic is true
             this.isRecordingFromMic = false;
-            console.log('🔇 已停止麦克风录音');
         }
     }
 
@@ -322,23 +428,16 @@ export class Client {
      * 开始语音聊天
      */
     async startVoiceChat() {
-        try {
-            console.log('🚀 开始语音聊天...');
-            this.setDeviceState(DeviceState.CONNECTING);
-
-            const success = await this.protocol.connect();
-            if (success) {
-                this.keepListening = true;
-                // 发送一个欢迎消息开始对话
-                await this.sendTextMessage('hi');
-            } else {
-                console.error('❌ 连接失败');
-                this.setDeviceState(DeviceState.IDLE);
-            }
-        } catch (error) {
-            console.error('❌ 启动语音聊天失败:', error);
-            this.setDeviceState(DeviceState.IDLE);
+        if (!this.protocol || !this.protocol.isConnected()) {
+            await this.protocol.connect();
         }
+        await this.protocol.openAudioChannel();
+
+        this.keepListening = true;
+        this.aborted = false;
+
+        console.log('🎤 开始语音聊天，进入监听状态...', this.protocol.sessionId);
+        await this.startListening(ListeningMode.AUTO_STOP);
     }
 
     /**
@@ -351,44 +450,47 @@ export class Client {
 
         await this.stopListening();
         this.setDeviceState(DeviceState.IDLE);
+
+        if (this.protocol.isAudioChannelOpened()) {
+            await this.protocol.closeAudioChannel();
+        }
     }
 
     /**
      * 打断对话
      */
     async interruptConversation() {
-        if (this.deviceState === DeviceState.SPEAKING) {
-            console.log('⚡ 打断AI播放...');
-            this.aborted = true;
-
-            // 发送中止消息
-            const message = {
-                session_id: this.protocol.sessionId || '',
-                type: 'abort',
-                reason: 'user_interruption'
-            };
-
-            await this.protocol.sendText(JSON.stringify(message));
-
-            // 停止音频播放
-            this.audioPlayer.stop();
-
-            // 立即开始监听
-            await this.startListening(ListeningMode.AUTO_STOP);
+        if (this.deviceState !== DeviceState.SPEAKING) {
+            console.warn('⚠️ AI 未在说话，无需打断');
+            return;
         }
+
+        console.log('⚡ 打断 AI 对话');
+        this.aborted = true;
+
+        // 停止播放
+        if (this.audioPlayer && this.audioPlayer.isPlaying) {
+            this.audioPlayer.stop();
+        }
+
+        // 停止当前轮次的监听，防止播放停止后自动开始下一轮
+        this.keepListening = false;
+        this.setDeviceState(DeviceState.IDLE);
+
+        // 可选：立即开始新一轮监听
+        // console.log('🎤 立即开始新一轮监听...');
+        // await this.startListening(ListeningMode.AUTO_STOP);
     }
 
     /**
-     * 完全断开连接
+     * 断开连接
      */
     async disconnect() {
-        console.log('🛑 断开连接...');
-        this.keepListening = false;
-        this.stopMicrophoneRecording();
-        await this.protocol.closeAudioChannel();
-        this.protocol.destroy();
-        this.setDeviceState(DeviceState.IDLE);
-        console.log('✅ 已完全断开连接');
+        await this.stopVoiceChat();
+        if (this.protocol) {
+            await this.protocol.destroy();
+        }
+        console.log('👋 客户端已断开连接');
     }
 }
 

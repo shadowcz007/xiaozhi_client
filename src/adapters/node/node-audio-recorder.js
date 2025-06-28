@@ -1,12 +1,15 @@
-// 麦克风录音和 Opus 编码模块
-// 使用 audify 库进行音频采集和编码
+import { IAudioRecorder } from '../../interfaces/audio-interfaces.js';
 import pkg from 'audify';
 const { RtAudio, RtAudioFormat, OpusEncoder, OpusApplication } = pkg;
-class MicrophoneOpusRecorder {
+
+/**
+ * Node.js 环境下的音频录音器实现
+ * 基于 audify 库，封装原有的 MicrophoneOpusRecorder 功能
+ */
+export class NodeAudioRecorder extends IAudioRecorder {
     constructor(options = {}) {
-        this.sampleRate = options.sampleRate || 16000; // 与小智项目保持一致
-        this.channels = options.channels || 1;
-        this.frameSize = options.frameSize || 320; // 20ms @ 16kHz (与WebSocket协议保持一致)
+        super(options);
+
         this.bitDepth = 16; // 16-bit PCM
 
         // 初始化 RtAudio 实例
@@ -17,10 +20,8 @@ class MicrophoneOpusRecorder {
 
         this.recording = false;
         this.streamOpened = false;
-
-        // 事件回调
-        this.onOpusData = null;
-        this.onError = null;
+        this.actualSampleRate = this.sampleRate;
+        this.resampler = null;
     }
 
     /**
@@ -50,7 +51,7 @@ class MicrophoneOpusRecorder {
     /**
      * 开始录音并实时输出 Opus 数据
      */
-    startRecording() {
+    async startRecording() {
         if (this.recording) {
             console.log('录音已在进行中');
             return;
@@ -182,7 +183,7 @@ class MicrophoneOpusRecorder {
     /**
      * 停止录音
      */
-    stopRecording() {
+    async stopRecording() {
         if (!this.recording) {
             console.log('录音未在进行中');
             return;
@@ -201,7 +202,7 @@ class MicrophoneOpusRecorder {
             console.log('✅ 录音已停止');
 
         } catch (error) {
-            console.error('停止录音时出错:', error);
+            console.error('停止录音失败:', error);
             if (this.onError) {
                 this.onError(error);
             }
@@ -213,16 +214,16 @@ class MicrophoneOpusRecorder {
      */
     pauseRecording() {
         if (!this.recording) {
-            console.log('录音未在进行中');
+            console.log('录音未在进行中，无法暂停');
             return;
         }
 
         try {
-            this.rtAudio.stop();
-            this.recording = false;
-            console.log('⏸️ 录音已暂停');
+            console.log('⏸️ 暂停录音...');
+            this.recording = false; // 停止处理音频数据，但保持流开启
+            console.log('✅ 录音已暂停');
         } catch (error) {
-            console.error('暂停录音时出错:', error);
+            console.error('暂停录音失败:', error);
             if (this.onError) {
                 this.onError(error);
             }
@@ -233,17 +234,22 @@ class MicrophoneOpusRecorder {
      * 恢复录音
      */
     resumeRecording() {
-        if (this.recording || !this.streamOpened) {
-            console.log('录音状态不正确，无法恢复');
+        if (this.recording) {
+            console.log('录音已在进行中');
+            return;
+        }
+
+        if (!this.streamOpened) {
+            console.log('音频流未开启，请先开始录音');
             return;
         }
 
         try {
-            this.rtAudio.start();
+            console.log('▶️ 恢复录音...');
             this.recording = true;
-            console.log('▶️ 录音已恢复');
+            console.log('✅ 录音已恢复');
         } catch (error) {
-            console.error('恢复录音时出错:', error);
+            console.error('恢复录音失败:', error);
             if (this.onError) {
                 this.onError(error);
             }
@@ -251,7 +257,7 @@ class MicrophoneOpusRecorder {
     }
 
     /**
-     * 检查是否正在录音
+     * 是否正在录音
      */
     isRecording() {
         return this.recording;
@@ -262,13 +268,12 @@ class MicrophoneOpusRecorder {
      */
     getAudioConfig() {
         return {
-            sampleRate: this.sampleRate,
+            sampleRate: this.actualSampleRate || this.sampleRate,
             channels: this.channels,
             frameSize: this.frameSize,
             bitDepth: this.bitDepth,
-            frameBytes: this.frameSize * 2, // 16-bit samples = 2 bytes per sample
-            mode: 'audify', // 标识这是audify模式
-            library: 'RtAudio' // 底层使用的音频库
+            recording: this.recording,
+            streamOpened: this.streamOpened
         };
     }
 
@@ -278,12 +283,12 @@ class MicrophoneOpusRecorder {
     getDeviceInfo() {
         try {
             const devices = this.getDevices();
-            const defaultInput = this.getDefaultInputDevice();
+            const defaultDevice = this.getDefaultInputDevice();
 
             return {
-                devices: devices,
-                defaultInputDevice: defaultInput,
-                currentDevice: defaultInput
+                availableDevices: devices,
+                defaultInputDevice: defaultDevice,
+                currentConfig: this.getAudioConfig()
             };
         } catch (error) {
             console.error('获取设备信息失败:', error);
@@ -295,14 +300,27 @@ class MicrophoneOpusRecorder {
      * 清理资源
      */
     cleanup() {
-        this.stopRecording();
+        try {
+            if (this.recording) {
+                this.stopRecording();
+            }
 
-        // 清理回调
-        this.onOpusData = null;
-        this.onError = null;
+            if (this.opusEncoder) {
+                this.opusEncoder = null;
+            }
 
-        console.log('✅ 录音器资源已清理');
+            if (this.resampler && this.resampler.encoder) {
+                this.resampler.encoder = null;
+                this.resampler = null;
+            }
+
+            if (this.rtAudio) {
+                this.rtAudio = null;
+            }
+
+            console.log('✅ Node.js 录音器资源已清理');
+        } catch (error) {
+            console.error('清理录音器资源失败:', error);
+        }
     }
 }
-
-export { MicrophoneOpusRecorder };

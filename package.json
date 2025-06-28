@@ -6,7 +6,7 @@
     "type": "module",
     "scripts": {
         "start": "bun --hot index.js",
-        "test": "bun --hot test.js",
+        "web": "bun --hot webServer.js",
         "devices": "bun --hot devices.js --menu",
         "build": "bun build index.js --target=node --compile --minify --outfile ./build/xiaozhi  --external=shelljs"
     },
@@ -23,6 +23,8 @@
     "dependencies": {
         "audify": "^1.9.0",
         "axios": "^1.6.0",
+        "opus-decoder": "^0.7.10",
+        "opus-recorder": "^8.0.5",
         "ws": "^8.18.2"
     },
     "engines": {

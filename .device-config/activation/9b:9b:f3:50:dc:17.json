@@ -1,0 +1,53 @@
+{
+  "device_id": "9b:9b:f3:50:dc:17",
+  "payload": {
+    "version": 2,
+    "mac_address": "9b:9b:f3:50:dc:17",
+    "uuid": "85c88c2a-1995-46f7-bd6d-eb4e6582c82f",
+    "hostname": "shadowdeMacBook-Pro-2.local",
+    "serial_number": "SN-ABB33169-9b9bf350dc17",
+    "system": "darwin",
+    "cpu": {
+      "model": "Intel(R) Core(TM) i5-8259U CPU @ 2.30GHz",
+      "cores": 8,
+      "arch": "x64",
+      "platform": "darwin"
+    },
+    "timestamp": 1751088129332,
+    "device_id": "9b:9b:f3:50:dc:17"
+  },
+  "headers": {
+    "Activation-Version": "2",
+    "Device-Id": "9b:9b:f3:50:dc:17",
+    "Client-Id": "85c88c2a-1995-46f7-bd6d-eb4e6582c82f",
+    "Content-Type": "application/json",
+    "User-Agent": "goodmate/1.0.0"
+  },
+  "data": {
+    "mqtt": {
+      "endpoint": "mqtt.xiaozhi.me",
+      "client_id": "GID_test@@@9b_9b_f3_50_dc_17@@@85c88c2a-1995-46f7-bd6d-eb4e6582c82f",
+      "username": "eyJpcCI6IjE4My4xOTMuMTM0LjU5In0=",
+      "password": "YBHfGH2BcwmkmDlrhP3Qmz60Y7XvSSiLy60+KYWd3W8=",
+      "publish_topic": "device-server",
+      "subscribe_topic": "null"
+    },
+    "websocket": {
+      "url": "wss://api.tenclass.net/xiaozhi/v1/",
+      "token": "test-token"
+    },
+    "server_time": {
+      "timestamp": 1751088129633,
+      "timezone_offset": 480
+    },
+    "firmware": {
+      "version": "1.0.0",
+      "url": ""
+    },
+    "activation": {
+      "code": "529239",
+      "message": "xiaozhi.me\n529239",
+      "challenge": "f4cbf3a2-4a79-4cdf-98b7-f4370b42e5ab"
+    }
+  }
+}

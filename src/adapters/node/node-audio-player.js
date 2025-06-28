@@ -1,15 +1,21 @@
+import { IAudioPlayer } from '../../interfaces/audio-interfaces.js';
 import pkg from 'audify';
 const { RtAudio, RtAudioFormat, OpusDecoder } = pkg;
 
-export class NodeAudioPlayer {
+/**
+ * Node.js 环境下的音频播放器实现
+ * 基于 audify 库，封装原有的 NodeAudioPlayer 功能
+ */
+export class NodeAudioPlayer extends IAudioPlayer {
     constructor() {
-        // 初始化 Opus 解码器 (注意：这里应该用 OpusDecoder，不是 OpusEncoder)
-        this.decoder = new OpusDecoder(24000, 1);
+        super();
+
+        // 初始化 Opus 解码器
+        this.decoder = new OpusDecoder(48000, 1);
 
         // 初始化 RtAudio 实例
         this.rtAudio = new RtAudio();
 
-        this.isPlaying = false;
         this.streamOpened = false;
         this.audioBuffer = [];
         this.bufferSize = 5; // 初始缓冲帧数：5
@@ -17,13 +23,14 @@ export class NodeAudioPlayer {
         this.maxBufferSize = 50; // 添加最大缓冲区限制，防止内存积累
 
         // 音频配置
-        this.sampleRate = 24000;
+        this.sampleRate = 48000;
         this.channels = 1;
         this.frameSize = Math.floor(this.sampleRate * 0.02); // 20ms frames
 
         // 播放状态监控
         this.lastDataTime = Date.now();
         this.playbackMonitor = null;
+        this.isPlaying = false;
     }
 
     /**
@@ -47,60 +54,31 @@ export class NodeAudioPlayer {
         }
 
         try {
-            const defaultOutputDevice = this.getDefaultOutputDevice();
-            if (defaultOutputDevice === null) {
-                throw new Error('未找到可用的输出设备');
+            // 获取默认输出设备
+            const outputDevices = this.rtAudio.getDevices();
+            const defaultOutputDevice = outputDevices.find(device => device.isDefaultOutput);
+
+            if (!defaultOutputDevice) {
+                throw new Error('找不到默认音频输出设备');
             }
 
-            // 尝试不同采样率
-            const sampleRates = [this.sampleRate, 48000, 44100, 22050];
-            let actualSampleRate = this.sampleRate;
-            let streamOpened = false;
-
-            for (const testRate of sampleRates) {
-                try {
-                    const frameSize = Math.floor(testRate * 0.02); // 20ms
-
-                    this.rtAudio.openStream({
-                            deviceId: defaultOutputDevice,
-                            nChannels: this.channels,
-                            firstChannel: 0
-                        },
-                        null, // 不需要输入流
-                        RtAudioFormat.RTAUDIO_SINT16,
-                        testRate,
-                        frameSize,
-                        "XiaozhiPlayer",
-                        null // 播放模式不需要回调
-                    );
-
-                    actualSampleRate = testRate;
-                    streamOpened = true;
-                    console.log(`🔊 音频输出流已初始化，采样率: ${actualSampleRate}Hz`);
-                    break;
-                } catch (err) {
-                    console.log(`⚠️ 输出采样率 ${testRate}Hz 不支持，尝试下一个...`);
-                    try {
-                        this.rtAudio.closeStream();
-                    } catch (e) {
-                        // 忽略关闭错误
-                    }
-                }
-            }
-
-            if (!streamOpened) {
-                throw new Error('无法初始化音频输出流');
-            }
+            // 打开音频流
+            this.rtAudio.openStream({
+                    deviceId: defaultOutputDevice.id,
+                    nChannels: this.channels,
+                    firstChannel: 0
+                },
+                null,
+                RtAudioFormat.RTAUDIO_SINT16,
+                this.sampleRate,
+                this.frameSize,
+                'MyStream',
+                null,
+                null
+            );
 
             this.streamOpened = true;
-            this.actualSampleRate = actualSampleRate;
-
-            // 如果采样率不同，需要重新创建解码器
-            if (actualSampleRate !== this.sampleRate) {
-                this.decoder = new OpusDecoder(actualSampleRate, this.channels);
-                this.frameSize = Math.floor(actualSampleRate * 0.02); // 更新frameSize
-                console.log(`🔄 重新创建解码器，采样率: ${actualSampleRate}Hz, frameSize: ${this.frameSize}`);
-            }
+            console.log(`🔊 音频输出流已初始化，采样率: ${this.sampleRate}Hz`);
 
             return true;
         } catch (error) {
@@ -110,7 +88,10 @@ export class NodeAudioPlayer {
         }
     }
 
-    processAudioData(opusData) {
+    /**
+     * 处理音频数据
+     */
+    async processAudioData(opusData) {
         try {
             // 验证输入数据
             if (!opusData || opusData.length === 0) {
@@ -126,16 +107,12 @@ export class NodeAudioPlayer {
 
             // 解码 Opus 数据为 PCM
             const frameSize = this.frameSize;
-            // console.log(`🎵 解码音频: opusSize=${opusData.length}, frameSize=${frameSize}, sampleRate=${this.actualSampleRate || this.sampleRate}`);
-
             const pcmData = this.decoder.decode(opusData, frameSize);
 
             if (!pcmData || pcmData.length === 0) {
                 console.warn('🔊 解码返回空PCM数据');
                 return;
             }
-
-            // console.log(`✅ 解码成功: PCM长度=${pcmData.length}`);
 
             // 检查缓冲区是否过满，防止内存积累
             if (this.audioBuffer.length >= this.maxBufferSize) {
@@ -166,12 +143,15 @@ export class NodeAudioPlayer {
                 opusDataLength: opusData ? opusData.length : 'null',
                 frameSize: this.frameSize,
                 decoderExists: !!this.decoder,
-                sampleRate: this.actualSampleRate || this.sampleRate,
+                sampleRate: this.sampleRate,
                 channels: this.channels
             });
         }
     }
 
+    /**
+     * 开始播放
+     */
     startPlayback() {
         if (this.isPlaying) {
             return;
@@ -194,6 +174,9 @@ export class NodeAudioPlayer {
         }
     }
 
+    /**
+     * 刷新缓冲区
+     */
     flushBuffer() {
         if (!this.streamOpened || !this.rtAudio || this.audioBuffer.length === 0) {
             return;
@@ -210,26 +193,36 @@ export class NodeAudioPlayer {
                 // 检查 PCM 数据大小是否正确
                 const expectedSize = this.frameSize * this.channels * 2; // 16-bit = 2 bytes per sample
 
-                if (pcmData.length !== expectedSize) {
-                    // 如果数据大小不匹配，跳过这帧数据
-                    console.warn(`🔊 PCM数据大小不匹配: 期望${expectedSize}字节，实际${pcmData.length}字节`);
-                    writeCount++;
+                if (!pcmData || pcmData.length === 0) {
+                    console.warn('🔊 跳过空的PCM数据');
                     continue;
                 }
 
+                // 如果数据大小不匹配，进行调整
+                let dataToWrite = pcmData;
+                if (pcmData.length !== expectedSize) {
+                    if (pcmData.length > expectedSize) {
+                        // 如果数据过长，截断
+                        dataToWrite = pcmData.slice(0, expectedSize);
+                        console.warn(`🔊 PCM数据过长，已截断至${expectedSize}字节`);
+                    } else {
+                        // 如果数据过短，填充静音
+                        dataToWrite = new Float32Array(expectedSize);
+                        dataToWrite.set(pcmData);
+                        console.warn(`🔊 PCM数据过短，已填充至${expectedSize}字节`);
+                    }
+                }
+
                 // 使用 RtAudio 写入音频数据
-                this.rtAudio.write(pcmData);
+                this.rtAudio.write(dataToWrite);
                 writeCount++;
             } catch (error) {
-                // 如果写入失败，重新放回数据
+                console.error('🔊 写入音频数据失败:', error);
+                // 如果写入失败，将数据放回缓冲区
                 this.audioBuffer.unshift(pcmData);
-                console.warn('🔊 音频写入失败:', error.message);
                 break;
             }
         }
-
-        // 只有在缓冲区完全空了且没有新数据到达时才暂停播放
-        // 注意：这里移除了立即暂停的逻辑，改为由外部控制
     }
 
     /**
@@ -237,23 +230,19 @@ export class NodeAudioPlayer {
      */
     startPlaybackMonitor() {
         if (this.playbackMonitor) {
-            clearInterval(this.playbackMonitor);
+            return;
         }
 
         this.playbackMonitor = setInterval(() => {
-            // 如果缓冲区为空且超过1秒没有新数据，停止播放
-            if (this.audioBuffer.length === 0 &&
-                Date.now() - this.lastDataTime > 1000 &&
-                this.isPlaying) {
-                console.log('🔊 缓冲区为空且超时，自动停止播放');
-                this.pausePlayback();
+            const now = Date.now();
+            const timeSinceLastData = now - this.lastDataTime;
+
+            // 如果超过1秒没有新数据且缓冲区为空，停止播放
+            if (timeSinceLastData > 1000 && this.audioBuffer.length === 0) {
+                console.log('🔊 播放完成，自动停止');
+                this.handlePlaybackFinished();
             }
-            // 如果缓冲区有数据但播放停止了，重新开始播放
-            else if (this.audioBuffer.length > 0 && !this.isPlaying && this.streamOpened) {
-                console.log('🔊 检测到缓冲区有数据，重新开始播放');
-                this.resumePlayback();
-            }
-        }, 200); // 每200ms检查一次
+        }, 100); // 每100ms检查一次
     }
 
     /**
@@ -267,7 +256,19 @@ export class NodeAudioPlayer {
     }
 
     /**
-     * 暂停播放（不关闭流）
+     * 处理播放完成
+     */
+    handlePlaybackFinished() {
+        this.isPlaying = false;
+        this.stopPlaybackMonitor();
+
+        if (this.onPlaybackFinished) {
+            this.onPlaybackFinished();
+        }
+    }
+
+    /**
+     * 暂停播放
      */
     pausePlayback() {
         if (!this.isPlaying) {
@@ -275,8 +276,8 @@ export class NodeAudioPlayer {
         }
 
         try {
-            this.rtAudio.stop();
             this.isPlaying = false;
+            this.stopPlaybackMonitor();
             console.log('⏸️ 音频播放已暂停');
         } catch (error) {
             console.error('🔊 暂停播放失败:', error);
@@ -291,66 +292,80 @@ export class NodeAudioPlayer {
             return;
         }
 
-        if (this.audioBuffer.length >= this.minBufferThreshold) {
-            try {
-                this.rtAudio.start();
-                this.isPlaying = true;
-                console.log('▶️ 音频播放已恢复');
-                this.flushBuffer();
-            } catch (error) {
-                console.error('🔊 恢复播放失败:', error);
-            }
-        }
-    }
-
-    stop() {
-        console.log('🔊 停止音频播放');
-        this.isPlaying = false;
-        this.audioBuffer = [];
-        this.stopPlaybackMonitor(); // 停止播放监控
-
-        if (this.streamOpened) {
-            try {
-                this.rtAudio.stop();
-                this.rtAudio.closeStream();
-                this.streamOpened = false;
-            } catch (error) {
-                console.error('🔊 关闭音频流失败:', error);
-            }
-        }
-    }
-
-    // 获取缓冲状态信息
-    getBufferStatus() {
-        return {
-            isPlaying: this.isPlaying,
-            streamOpened: this.streamOpened,
-            bufferLength: this.audioBuffer.length,
-            bufferSize: this.bufferSize,
-            threshold: this.minBufferThreshold,
-            sampleRate: this.actualSampleRate || this.sampleRate,
-            channels: this.channels
-        };
-    }
-
-    // 强制重启播放的方法
-    forceRestart() {
-        if (this.audioBuffer.length >= this.minBufferThreshold && !this.isPlaying) {
-            console.log('🔊 强制重启音频播放');
-            this.startPlayback();
+        try {
+            this.isPlaying = true;
+            this.startPlaybackMonitor();
+            this.flushBuffer();
+            console.log('▶️ 音频播放已恢复');
+        } catch (error) {
+            console.error('🔊 恢复播放失败:', error);
+            this.isPlaying = false;
         }
     }
 
     /**
-     * 获取音频配置信息
+     * 停止播放
+     */
+    async stop() {
+        try {
+            console.log('🛑 停止音频播放...');
+            this.isPlaying = false;
+            this.stopPlaybackMonitor();
+
+            // 清空缓冲区
+            this.audioBuffer = [];
+
+            if (this.streamOpened) {
+                this.rtAudio.stop();
+                this.rtAudio.closeStream();
+                this.streamOpened = false;
+            }
+
+            console.log('✅ 音频播放已停止');
+        } catch (error) {
+            console.error('🔊 停止播放失败:', error);
+        }
+    }
+
+    /**
+     * 获取缓冲状态
+     */
+    getBufferStatus() {
+        return {
+            bufferLength: this.audioBuffer.length,
+            bufferSize: this.bufferSize,
+            minThreshold: this.minBufferThreshold,
+            maxSize: this.maxBufferSize,
+            isPlaying: this.isPlaying,
+            streamOpened: this.streamOpened,
+            lastDataTime: this.lastDataTime
+        };
+    }
+
+    /**
+     * 强制重启播放
+     */
+    forceRestart() {
+        console.log('🔄 强制重启音频播放...');
+        this.stop().then(() => {
+            // 等待一点时间再重新开始
+            setTimeout(() => {
+                if (this.audioBuffer.length > 0) {
+                    this.startPlayback();
+                }
+            }, 100);
+        });
+    }
+
+    /**
+     * 获取音频配置
      */
     getAudioConfig() {
         return {
-            sampleRate: this.actualSampleRate || this.sampleRate,
+            sampleRate: this.sampleRate,
             channels: this.channels,
             frameSize: this.frameSize,
-            mode: 'audify',
-            library: 'RtAudio'
+            bufferStatus: this.getBufferStatus()
         };
     }
 
@@ -358,8 +373,22 @@ export class NodeAudioPlayer {
      * 清理资源
      */
     cleanup() {
-        this.stopPlaybackMonitor(); // 确保停止监控
-        this.stop();
-        console.log('✅ 音频播放器资源已清理');
+        try {
+            this.stop();
+            this.stopPlaybackMonitor();
+
+            if (this.decoder) {
+                this.decoder = null;
+            }
+
+            if (this.rtAudio) {
+                this.rtAudio = null;
+            }
+
+            this.audioBuffer = [];
+            console.log('✅ Node.js 播放器资源已清理');
+        } catch (error) {
+            console.error('清理播放器资源失败:', error);
+        }
     }
 }
