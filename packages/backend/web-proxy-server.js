@@ -1,53 +1,24 @@
 // https-server.js
-import { checkDeviceStatus } from './src/device-status.js';
+import { checkDeviceStatus } from '@xiaozhi/core';
 
 import http from 'http';
 import { WebSocketServer } from 'ws';
-import fs from 'fs';
 import path from 'path';
 import pkg from 'audify';
 const { OpusEncoder, OpusApplication } = pkg;
 
 // 导入我们已经验证可用的 Node.js WebSocket 客户端
-import { NodeWebSocketProtocol } from './src/adapters/node/node-websocket.js';
+import { NodeWebSocketProtocol } from '../core/src/adapters/node/node-websocket.js';
 
 // 小知后端服务的真实地址
 const XIAOZHI_SERVICE_URL = 'wss://api.tenclass.net/xiaozhi/v1/';
 const PORT = 3000;
 
-// 创建一个 HTTP 服务器来提供静态文件和处理 WebSocket 升级请求
+// 创建一个 HTTP 服务器, 主要用于 WebSocket 的升级(upgrade)请求
 const server = http.createServer((req, res) => {
-    // 简单的静态文件服务器逻辑
-    let filePath = '.' + req.url;
-    if (filePath === './') {
-        filePath = 'src/web/chat.html'; // 默认提供 chat.html
-    }
-
-    const extname = String(path.extname(filePath)).toLowerCase();
-    const mimeTypes = {
-        '.html': 'text/html',
-        '.js': 'text/javascript',
-        '.css': 'text/css',
-        '.json': 'application/json',
-    };
-
-    const contentType = mimeTypes[extname] || 'application/octet-stream';
-
-    console.log('filePath', filePath);
-    fs.readFile(filePath, (error, content) => {
-        if (error) {
-            if (error.code == 'ENOENT') {
-                res.writeHead(404, { 'Content-Type': 'text/plain' });
-                res.end('Not Found', 'utf-8');
-            } else {
-                res.writeHead(500);
-                res.end('Sorry, check with the site admin for error: ' + error.code + ' ..\n');
-            }
-        } else {
-            res.writeHead(200, { 'Content-Type': contentType });
-            res.end(content, 'utf-8');
-        }
-    });
+    // 我们的服务器现在只处理 WebSocket, 对于普通的 HTTP 请求可以直接响应成功或提示信息
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('WebSocket Proxy Server is running. Please connect via WebSocket.');
 });
 
 // 创建 WebSocket 服务器并将其附加到 HTTP 服务器
