@@ -69,19 +69,19 @@ async function browserClient(port = 3000) {
 
         // --- UI 交互逻辑 ---
 
-        const logsEl = document.getElementById('logs');
-        const addLog = (message) => {
-            if (logsEl) {
-                const timestamp = new Date().toLocaleTimeString();
-                logsEl.innerHTML += `<div>[${timestamp}] ${message}</div>`;
-                logsEl.scrollTop = logsEl.scrollHeight;
-            }
-        };
+        // const logsEl = document.getElementById('logs');
+        // const addLog = (message) => {
+        //     if (logsEl) {
+        //         const timestamp = new Date().toLocaleTimeString();
+        //         logsEl.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+        //         logsEl.scrollTop = logsEl.scrollHeight;
+        //     }
+        // };
 
         const originalLog = console.log;
         console.log = function(...args) {
             originalLog.apply(console, args);
-            addLog(args.join(' '));
+            // addLog(args.join(' '));
         };
 
         client.onStateChanged = (newState) => {
@@ -101,7 +101,7 @@ async function browserClient(port = 3000) {
                 try {
                     await client.startVoiceChat();
                     startBtn.disabled = true;
-                    stopBtn.disabled = false;
+                    // stopBtn.disabled = false;
                     interruptBtn.disabled = false;
                 } catch (error) {
                     console.error(`❌ 启动失败: ${error.message}`);
@@ -110,19 +110,19 @@ async function browserClient(port = 3000) {
             };
         }
 
-        if (stopBtn) {
-            stopBtn.onclick = async() => {
-                try {
-                    await client.stopVoiceChat();
-                    startBtn.disabled = false;
-                    stopBtn.disabled = true;
-                    interruptBtn.disabled = true;
-                } catch (error) {
-                    console.error(`❌ 停止失败: ${error.message}`);
-                    showError('停止失败', error.message);
-                }
-            };
-        }
+        // if (stopBtn) {
+        //     stopBtn.onclick = async() => {
+        //         try {
+        //             await client.stopVoiceChat();
+        //             startBtn.disabled = false;
+        //             stopBtn.disabled = true;
+        //             interruptBtn.disabled = true;
+        //         } catch (error) {
+        //             console.error(`❌ 停止失败: ${error.message}`);
+        //             showError('停止失败', error.message);
+        //         }
+        //     };
+        // }
 
         if (interruptBtn) {
             interruptBtn.onclick = async() => {
@@ -132,6 +132,8 @@ async function browserClient(port = 3000) {
                     console.error(`❌ 打断失败: ${error.message}`);
                     showError('打断失败', error.message);
                 }
+                startBtn.disabled = false;
+                interruptBtn.disabled = true;
             };
         }
 

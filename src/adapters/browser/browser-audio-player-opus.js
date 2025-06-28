@@ -91,6 +91,11 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
             // 初始化调度时间
             this.scheduledTime = this.audioContext.currentTime;
 
+            // [新增] 监听音频上下文状态变化，方便调试
+            this.audioContext.onstatechange = () => {
+                console.log(`[AudioPlayer] AudioContext state changed to: ${this.audioContext}`);
+            };
+
             console.log(`🔧 音频上下文初始化，采样率: ${this.audioContext.sampleRate}Hz`);
             return true;
         } catch (error) {
@@ -168,18 +173,18 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
     }
 
     /**
-     * 停止播放
+     * 停止播放并清理所有资源
      */
     async stop() {
-        if (!this.isPlaying) {
-            console.log('播放器未在运行中');
+        if (this.isStopping) {
+            console.log('播放器正在停止中...');
             return;
         }
+        this.isStopping = true;
 
         try {
-            console.log('🛑 停止播放器...');
+            console.log('🛑 停止播放器并清理资源...');
 
-            // 停止调度循环
             if (this.schedulerHandle) {
                 cancelAnimationFrame(this.schedulerHandle);
                 this.schedulerHandle = null;
@@ -187,29 +192,38 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
 
             this.isPlaying = false;
             this.ttsStopReceived = false;
-
-            // 清空缓冲区
             this.audioBufferQueue = [];
 
-            // 停止并清除所有活动的音频源
             if (this.activeSources) {
                 this.activeSources.forEach(source => {
-                    source.onended = null; // 移除 onended 回调
-                    source.stop();
+                    try {
+                        source.onended = null;
+                        source.stop();
+                    } catch (e) {
+                        // 忽略已经无法操作的节点的错误
+                    }
                 });
                 this.activeSources.clear();
             }
 
-            // 重置调度时间
-            this.scheduledTime = this.audioContext ? this.audioContext.currentTime : 0;
+            if (this.decoder) {
+                this.decoder.free();
+                this.decoder = null;
+            }
 
-            console.log('✅ 播放器已停止');
+            if (this.audioContext) {
+                if (this.audioContext.state !== 'closed') {
+                    await this.audioContext.close();
+                }
+                this.audioContext = null;
+            }
+
+            console.log('✅ 播放器资源已完全清理');
 
         } catch (error) {
-            console.error('停止播放器失败:', error);
-            if (this.onError) {
-                this.onError(error);
-            }
+            console.error('停止或清理播放器时发生错误:', error);
+        } finally {
+            this.isStopping = false;
         }
     }
 
@@ -345,6 +359,11 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
      * 使用 requestAnimationFrame 以获得最佳性能
      */
     playbackScheduler() {
+        // [修改] 在调度前检查并尝试恢复 AudioContext
+        if (this.audioContext && this.audioContext.state === 'suspended') {
+            this.audioContext.resume().catch(e => console.error("无法自动恢复音频上下文", e));
+        }
+
         if (!this.isPlaying) {
             return;
         }
@@ -403,17 +422,18 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
      * 检查播放是否完成
      */
     checkPlaybackFinished() {
-        // 必须同时满足两个条件：
+        // 必须同时满足三个条件：
         // 1. tts:stop 消息已经收到 (意味着不会再有新的音频数据)
         // 2. 所有已调度的音频源都已播放完毕
-        if (this.ttsStopReceived && this.activeSources.size === 0) {
-            console.log('✅ 所有音频片段播放完成');
-            this.isPlaying = false;
-            this.ttsStopReceived = false; // 重置状态
-
+        // 3. 音频缓冲区也为空
+        if (this.ttsStopReceived && this.activeSources.size === 0 && this.audioBufferQueue.length === 0) {
+            console.log('✅ 所有音频片段播放完成，将执行清理。');
             if (this.onPlaybackFinished) {
                 this.onPlaybackFinished();
             }
+
+            // 执行彻底的清理
+            this.stop().catch(e => console.error("播放完成后的清理失败:", e));
         }
     }
 
@@ -553,20 +573,8 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
      * 清理资源
      */
     async cleanup() {
-        console.log('🧹 清理 Opus 播放器资源...');
+        console.log('🧹 cleanup() 已被弃用, 请调用 stop()。');
         await this.stop();
-
-        if (this.decoder) {
-            this.decoder.free();
-            this.decoder = null;
-        }
-
-        if (this.audioContext) {
-            await this.audioContext.close();
-            this.audioContext = null;
-        }
-
-        console.log('✅ Opus 播放器资源已清理');
     }
 
     /**

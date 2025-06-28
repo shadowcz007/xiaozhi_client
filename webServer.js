@@ -152,7 +152,7 @@ wss.on('connection', async(browserWs, req) => {
 
                             // 编码这一帧
                             const opusData = opusEncoder.encode(pcmFrame, OPUS_FRAME_SAMPLES);
-                            console.log(`📤 转发 PCM 数据 (大小: ${pcmFrame.length} 字节) -> 编码为 Opus (大小: ${opusData.length} 字节)`);
+                            // console.log(`📤 转发 PCM 数据 (大小: ${pcmFrame.length} 字节) -> 编码为 Opus (大小: ${opusData.length} 字节)`);
                             xiaozhiClient.websocket.send(opusData);
 
                             // 从缓冲区移除已处理的数据

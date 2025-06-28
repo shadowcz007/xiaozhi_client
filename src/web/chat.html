@@ -78,15 +78,15 @@
         <button id="interruptBtn" disabled>打断对话</button>
     </div>
 
-    <div>
+    <div style="display: none;">
         <h3>平台信息:</h3>
         <pre id="platformInfo"></pre>
     </div>
 
-    <div>
+    <!-- <div>
         <h3>日志:</h3>
         <div id="logs"></div>
-    </div>
+    </div> -->
 
     <script type="module">
         import { browserClient } from './src/web/index.js'; browserClient(); // 启动客户端

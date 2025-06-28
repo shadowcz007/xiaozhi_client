@@ -112,7 +112,7 @@ export class Client {
      * 处理接收到的JSON消息
      */
     handleIncomingJson(jsonData) {
-        console.log('📨 接收到消息:', jsonData);
+        // console.log('📨 接收到消息:', jsonData);
 
         const msgType = jsonData.type;
 
@@ -469,13 +469,12 @@ export class Client {
             this.audioPlayer.stop();
         }
 
-        // 停止当前轮次的监听，防止播放停止后自动开始下一轮
-        this.keepListening = false;
-        this.setDeviceState(DeviceState.IDLE);
+        // 确保之前的监听已停止，为开始新的监听做准备
+        await this.stopListening();
 
-        // 可选：立即开始新一轮监听
-        // console.log('🎤 立即开始新一轮监听...');
-        // await this.startListening(ListeningMode.AUTO_STOP);
+        // 立即开始新一轮监听
+        console.log('🎤 AI 已被打断，立即开始新一轮监听...');
+        await this.startListening(ListeningMode.AUTO_STOP);
     }
 
     /**

@@ -107,11 +107,11 @@ export class BrowserWebSocket extends IWebSocketProtocol {
                         }
                     } else if (data instanceof Blob) {
                         const arrayBuffer = await data.arrayBuffer();
-                        console.log('接收到音频数据 (Blob):', arrayBuffer.byteLength);
+                        // console.log('接收到音频数据 (Blob):', arrayBuffer.byteLength);
                         this.emit('incomingAudio', arrayBuffer);
                     } else if (data instanceof ArrayBuffer) {
                         // 处理二进制数据
-                        console.log('接收到音频数据 (ArrayBuffer):', data.byteLength);
+                        // console.log('接收到音频数据 (ArrayBuffer):', data.byteLength);
                         this.emit('incomingAudio', data);
                     }
                 };
@@ -211,7 +211,7 @@ export class BrowserWebSocket extends IWebSocketProtocol {
      */
     sendAudio(audioData) {
         if (this.isAudioChannelOpened() && audioData && audioData.byteLength > 0) {
-            console.log(`[WebSocket] Sending audio data: ${audioData.byteLength} bytes.`);
+            // console.log(`[WebSocket] Sending audio data: ${audioData.byteLength} bytes.`);
             this.ws.send(audioData);
         }
     }
