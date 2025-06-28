@@ -20,7 +20,7 @@ const server = http.createServer((req, res) => {
     // 简单的静态文件服务器逻辑
     let filePath = '.' + req.url;
     if (filePath === './') {
-        filePath = './chat.html'; // 默认提供 chat.html
+        filePath = 'src/web/chat.html'; // 默认提供 chat.html
     }
 
     const extname = String(path.extname(filePath)).toLowerCase();
@@ -33,6 +33,7 @@ const server = http.createServer((req, res) => {
 
     const contentType = mimeTypes[extname] || 'application/octet-stream';
 
+    console.log('filePath', filePath);
     fs.readFile(filePath, (error, content) => {
         if (error) {
             if (error.code == 'ENOENT') {
@@ -213,5 +214,5 @@ wss.on('connection', async(browserWs, req) => {
 });
 
 server.listen(PORT, () => {
-    console.log(`请在浏览器中打开 http://localhost:${PORT}/chat.html`);
+    console.log(`请在浏览器中打开 http://localhost:${PORT}`);
 });

@@ -405,17 +405,32 @@ export class Client {
         }
     }
 
+
     /**
      * 开始语音聊天
      */
     async startVoiceChat() {
+        // 首先停止之前可能存在的录音和播放
+        if (this.isRecordingFromMic) {
+            await this.stopMicrophoneRecording();
+        }
+
+        // 停止音频播放器
+        if (this.audioPlayer && this.audioPlayer.isPlaying) {
+            this.audioPlayer.stop();
+        }
+
+        // 重置所有状态
+        this.keepListening = true;
+        this.aborted = false;
+        this.isStartingToListen = false;
+        this.audioBuffer = [];
+        this.setDeviceState(DeviceState.CONNECTING);
+
         if (!this.protocol || !this.protocol.isConnected()) {
             await this.protocol.connect();
         }
         await this.protocol.openAudioChannel();
-
-        this.keepListening = true;
-        this.aborted = false;
 
         console.log('🎤 开始语音聊天，进入监听状态...', this.protocol.sessionId);
         await this.startListening(ListeningMode.AUTO_STOP);
