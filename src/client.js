@@ -158,18 +158,14 @@ export class Client {
     /**
      * 处理TTS停止事件
      */
-    async handleTtsStop() {
-        console.log('TTS 停止，等待音频播放完成...');
-        // 等待音频播放完成
-        await this.waitForAudioPlaybackComplete();
-
-        // if (this.keepListening && !this.aborted) {
-        //     // 自动开启下一轮监听
-        //     console.log('🎤 自动开启下一轮监听...');
-        //     await this.startListening(ListeningMode.AUTO_STOP);
-        // } else {
-        //     this.setDeviceState(DeviceState.IDLE);
-        // }
+    handleTtsStop() {
+        console.log('TTS 流结束，通知播放器准备检查播放完成状态。');
+        // 当收到TTS停止消息时，我们通知播放器。
+        // 播放器将负责在所有已缓冲的音频播放完毕后，调用 onPlaybackFinished。
+        // 这也处理了没有收到任何音频的边缘情况（播放器会立即回调）。
+        if (this.audioPlayer) {
+            this.audioPlayer.signalTtsStop();
+        }
     }
 
     /**
@@ -190,21 +186,6 @@ export class Client {
         } else {
             this.setDeviceState(DeviceState.IDLE);
         }
-    }
-
-    /**
-     * 等待音频播放完成
-     */
-    async waitForAudioPlaybackComplete() {
-        return new Promise((resolve) => {
-            const checkInterval = setInterval(() => {
-                if (!this.audioPlayer.isPlaying) {
-                    clearInterval(checkInterval);
-                    // 额外等待一点时间确保播放完全结束
-                    setTimeout(resolve, 200);
-                }
-            }, 100);
-        });
     }
 
     /**

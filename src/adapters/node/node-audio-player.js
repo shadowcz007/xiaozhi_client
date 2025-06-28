@@ -31,6 +31,8 @@ export class NodeAudioPlayer extends IAudioPlayer {
         this.lastDataTime = Date.now();
         this.playbackMonitor = null;
         this.isPlaying = false;
+        this.ttsStopReceived = false;
+        this.lastBufferEmptyTime = null; // 用于播放完成的延迟检查
     }
 
     /**
@@ -165,6 +167,8 @@ export class NodeAudioPlayer extends IAudioPlayer {
         try {
             this.rtAudio.start();
             this.isPlaying = true;
+            this.ttsStopReceived = false; // 新的播放开始，重置标志
+            this.lastBufferEmptyTime = null; // 重置计时器
             console.log('🔊 开始音频播放');
             this.startPlaybackMonitor(); // 启动播放监控
             this.flushBuffer();
@@ -235,12 +239,29 @@ export class NodeAudioPlayer extends IAudioPlayer {
 
         this.playbackMonitor = setInterval(() => {
             const now = Date.now();
-            const timeSinceLastData = now - this.lastDataTime;
 
-            // 如果超过1秒没有新数据且缓冲区为空，停止播放
-            if (timeSinceLastData > 1000 && this.audioBuffer.length === 0) {
-                console.log('🔊 播放完成，自动停止');
-                this.handlePlaybackFinished();
+            if (this.ttsStopReceived) {
+                if (this.audioBuffer.length === 0) {
+                    if (this.lastBufferEmptyTime === null) {
+                        // 缓冲区刚变为空，记录时间。
+                        this.lastBufferEmptyTime = now;
+                        console.log('🔊 内部缓冲区已空，启动播放完成倒计时...');
+                    }
+
+                    // 检查缓冲区持续为空的时间
+                    const emptyDuration = now - this.lastBufferEmptyTime;
+                    if (emptyDuration >= 300) { // 300毫秒的宽限期
+                        console.log(`🔊 缓冲区已空置 ${emptyDuration}ms，判定为播放完成。`);
+                        this.handlePlaybackFinished();
+                        return;
+                    }
+                } else {
+                    // 缓冲区内有数据，重置计时器。
+                    if (this.lastBufferEmptyTime !== null) {
+                        console.log('🔊 在倒计时期间收到新数据，取消播放完成。');
+                    }
+                    this.lastBufferEmptyTime = null;
+                }
             }
         }, 100); // 每100ms检查一次
     }
@@ -259,6 +280,9 @@ export class NodeAudioPlayer extends IAudioPlayer {
      * 处理播放完成
      */
     handlePlaybackFinished() {
+        if (!this.isPlaying) {
+            return; // 防止重复触发
+        }
         this.isPlaying = false;
         this.stopPlaybackMonitor();
 
@@ -310,6 +334,8 @@ export class NodeAudioPlayer extends IAudioPlayer {
         try {
             console.log('🛑 停止音频播放...');
             this.isPlaying = false;
+            this.ttsStopReceived = false; // 重置
+            this.lastBufferEmptyTime = null; // 重置
             this.stopPlaybackMonitor();
 
             // 清空缓冲区
@@ -390,5 +416,14 @@ export class NodeAudioPlayer extends IAudioPlayer {
         } catch (error) {
             console.error('清理播放器资源失败:', error);
         }
+    }
+
+    /**
+     * 接收到TTS停止信号
+     */
+    signalTtsStop() {
+        console.log('🔊 NodePlayer 收到 TTS 停止信号');
+        this.ttsStopReceived = true;
+        // 播放监控器 (playbackMonitor) 将处理所有完成逻辑
     }
 }

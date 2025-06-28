@@ -79,6 +79,13 @@ export class IAudioPlayer {
     }
 
     /**
+     * 接收到TTS停止信号，表明不会再有新的音频数据
+     */
+    signalTtsStop() {
+        // 默认实现为空，具体实现由子类提供
+    }
+
+    /**
      * 获取缓冲状态
      */
     getBufferStatus() {

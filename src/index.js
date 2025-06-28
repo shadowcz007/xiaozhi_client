@@ -36,8 +36,7 @@ const pcmConfig = {
         bufferSize: 4096 // 适用于 ScriptProcessorNode 的缓冲区大小
     },
     audioPlayerOptions: {
-        useOpus: true, // 播放仍然使用 Opus，因为服务器会返回 Opus
-        decoderPath: '/public/opus-decoder.min.js', // 修正路径
+        useOpus: true, // 播放仍然使用 Opus，因为服务器会返回 Opus 
         sampleRate: 16000,
         numberOfChannels: 1,
         volume: 1.0
@@ -90,10 +89,7 @@ async function nodeClient(name, deviceId) {
         console.log('✅ Node.js 客户端启动成功');
 
         // 模拟运行一段时间后断开连接
-        setTimeout(async() => {
-            await client.disconnect();
-            console.log('👋 Node.js 示例结束');
-        }, 10000);
+        // await client.disconnect();
 
     } catch (error) {
         console.error('❌ Node.js 示例失败:', error);

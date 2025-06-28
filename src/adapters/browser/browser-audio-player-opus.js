@@ -15,9 +15,11 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
         this.analyserNode = null;
 
         // 播放控制
-        this.playing = false;
+        this.isPlaying = false;
         this.volume = options.volume || 1.0;
         this.scheduledTime = 0;
+        this.activeSources = new Set();
+        this.ttsStopReceived = false;
 
         // 统计信息
         this.stats = {
@@ -129,7 +131,7 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
      * 开始播放
      */
     async start() {
-        if (this.playing) {
+        if (this.isPlaying) {
             console.log('播放器已在运行中');
             return;
         }
@@ -146,12 +148,12 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
             // 初始化 opus-decoder
             await this.initializeOpusDecoder();
 
-            this.playing = true;
+            this.isPlaying = true;
             console.log('✅ Opus 播放器已启动');
 
         } catch (error) {
             console.error('启动播放器失败:', error);
-            this.playing = false;
+            this.isPlaying = false;
             if (this.onError) {
                 this.onError(error);
             }
@@ -163,7 +165,7 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
      * 停止播放
      */
     async stop() {
-        if (!this.playing) {
+        if (!this.isPlaying) {
             console.log('播放器未在运行中');
             return;
         }
@@ -171,7 +173,17 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
         try {
             console.log('🛑 停止播放器...');
 
-            this.playing = false;
+            this.isPlaying = false;
+            this.ttsStopReceived = false;
+
+            // 停止并清除所有活动的音频源
+            if (this.activeSources) {
+                this.activeSources.forEach(source => {
+                    source.onended = null; // 移除 onended 回调
+                    source.stop();
+                });
+                this.activeSources.clear();
+            }
 
             // 重置调度时间
             this.scheduledTime = this.audioContext ? this.audioContext.currentTime : 0;
@@ -191,7 +203,7 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
      * @param {ArrayBuffer} opusData
      */
     processAudioData(opusData) {
-        if (!this.playing) {
+        if (!this.isPlaying) {
             this.start().then(() => {
                 this.playOpusData(opusData);
             });
@@ -204,7 +216,7 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
      * 播放 Opus 数据
      */
     async playOpusData(opusData) {
-        if (!this.playing || !this.decoder || !this.audioContext) {
+        if (!this.isPlaying || !this.decoder || !this.audioContext) {
             console.warn('播放器未初始化或未启动');
             return;
         }
@@ -261,7 +273,7 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
      * @param {Array<Uint8Array>} opusDataArray
      */
     async playOpusDataBatch(opusDataArray) {
-        if (!this.playing || !this.decoder || !this.audioContext) {
+        if (!this.isPlaying || !this.decoder || !this.audioContext) {
             console.warn('批量播放时播放器未初始化或未启动');
             return;
         }
@@ -325,6 +337,17 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
         sourceNode.buffer = audioBuffer;
         sourceNode.connect(this.gainNode);
 
+        // 跟踪此音频源
+        this.activeSources.add(sourceNode);
+
+        sourceNode.onended = () => {
+            // 当此音频源播放结束时，将其从跟踪集合中移除
+            this.activeSources.delete(sourceNode);
+
+            // 检查是否所有音频源都已播放完毕
+            this.checkPlaybackFinished();
+        };
+
         const now = this.audioContext.currentTime;
         const playTime = Math.max(now, this.scheduledTime);
 
@@ -348,6 +371,40 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
                 channels: audioBuffer.numberOfChannels,
                 samples: audioBuffer.length
             });
+        }
+    }
+
+    /**
+     * 接收到TTS停止信号
+     */
+    signalTtsStop() {
+        console.log('播放器收到 TTS 停止信号，开始播放完成倒计时...');
+        this.ttsStopReceived = true;
+
+        // 使用 setTimeout 创建一个宽限期。
+        // 这让任何最终的、在途的音频包有机会到达并被调度播放。
+        setTimeout(() => {
+            // 在宽限期后，检查播放是否真正完成。
+            // `checkPlaybackFinished` 将验证在此期间没有新的音频源被添加。
+            this.checkPlaybackFinished();
+        }, 300); // 300毫秒的宽限期
+    }
+
+    /**
+     * 检查播放是否完成
+     */
+    checkPlaybackFinished() {
+        // 必须同时满足两个条件：
+        // 1. tts:stop 消息已经收到 (意味着不会再有新的音频数据)
+        // 2. 所有已调度的音频源都已播放完毕
+        if (this.ttsStopReceived && this.activeSources.size === 0) {
+            console.log('✅ 所有音频片段播放完成');
+            this.isPlaying = false;
+            this.ttsStopReceived = false; // 重置状态
+
+            if (this.onPlaybackFinished) {
+                this.onPlaybackFinished();
+            }
         }
     }
 
@@ -417,7 +474,7 @@ export class BrowserAudioPlayerOpus extends IAudioPlayer {
      */
     getPlayerState() {
         return {
-            playing: this.playing,
+            playing: this.isPlaying,
             volume: this.volume,
             scheduledTime: this.scheduledTime,
             currentTime: this.audioContext ? this.audioContext.currentTime : 0,
