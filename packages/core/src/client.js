@@ -46,6 +46,11 @@ export class Client {
         this.isRecordingFromMic = false;
         this.audioBuffer = []; // 用于在监听状态完全就绪前缓存音频
         this.isStartingToListen = false; // 用于标记正在启动监听过程
+
+        this.onTtsStart = () => {};
+        this.onTtsStop = () => {};
+        this.onStt = () => {};
+        this.onLlm = () => {};
     }
 
     /**
@@ -141,11 +146,11 @@ export class Client {
         const state = data.state;
 
         if (state === 'start') {
-            console.log('🗣️ 开始播放AI回复');
+            // console.log('🗣️ 开始播放AI回复');
             this.setDeviceState(DeviceState.SPEAKING);
             this.aborted = false;
         } else if (state === 'stop') {
-            console.log('🔇 AI回复播放完成');
+            // console.log('🔇 AI回复播放完成');
             this.handleTtsStop();
         } else if (state === 'sentence_start') {
             const text = data.text;

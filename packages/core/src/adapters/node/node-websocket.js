@@ -196,7 +196,7 @@ export class NodeWebSocketProtocol extends IWebSocketProtocol {
                 } else {
                     messageStr = data;
                 }
-                console.log('收到消息:', messageStr);
+                // console.log('收到消息:', messageStr);
                 // 处理 JSON 消息
                 try {
                     const jsonData = JSON.parse(messageStr);
