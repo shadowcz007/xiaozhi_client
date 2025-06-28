@@ -91,7 +91,7 @@ export class Client {
         this.protocol.on('incomingAudio', (audioData) => {
             const audioSize = audioData.byteLength || audioData.length || audioData.size;
             // console.log('🎤 接收到音频数据:', audioSize);
-            if (this.deviceState === DeviceState.SPEAKING && audioSize > 0) {
+            if (this.deviceState === DeviceState.SPEAKING && !this.aborted && audioSize > 0) {
                 this.audioPlayer.processAudioData(audioData);
             }
         });
@@ -184,7 +184,11 @@ export class Client {
             console.log('🎤 播放完成，自动开启下一轮监听...');
             await this.startListening(ListeningMode.AUTO_STOP);
         } else {
-            this.setDeviceState(DeviceState.IDLE);
+            // 如果不是因为被打断而停止，则将状态设置为空闲
+            // 在打断场景下，状态由 interruptConversation 方法管理
+            if (!this.aborted) {
+                this.setDeviceState(DeviceState.IDLE);
+            }
         }
     }
 
@@ -322,19 +326,32 @@ export class Client {
 
     /**
      * 停止监听
+     * 这个方法现在只负责停止录音和通知服务器，不再改变客户端状态。
      */
     async stopListening() {
-        // 即使没有在录音，也要确保发送停止消息和设置状态
+        // 停止麦克风录音
+        await this.stopMicrophoneRecording();
+
+        // 如果会话ID无效，则无需发送消息
+        if (!this.protocol.sessionId) {
+            console.warn('⚠️ 会话ID无效，无法发送停止监听消息');
+            return;
+        }
+
         const message = {
-            session_id: this.protocol.sessionId || '',
+            session_id: this.protocol.sessionId,
             type: 'listen',
             state: 'stop'
         };
 
-        // 停止麦克风录音
-        await this.stopMicrophoneRecording();
-
         await this.protocol.sendText(JSON.stringify(message));
+    }
+
+    /**
+     * 停止监听并设置状态为空闲
+     */
+    async stopListeningAndSetIdle() {
+        await this.stopListening();
         this.setDeviceState(DeviceState.IDLE);
     }
 
@@ -367,7 +384,7 @@ export class Client {
             // 设置错误回调
             this.micRecorder.onError = (error) => {
                 console.error('❌ 麦克风录音错误:', error);
-                this.stopListening(); // 录音出错时停止监听
+                this.stopListeningAndSetIdle(); // 录音出错时停止监听
             };
 
             await this.micRecorder.startRecording();
@@ -444,8 +461,7 @@ export class Client {
         this.keepListening = false;
         this.aborted = true;
 
-        await this.stopListening();
-        this.setDeviceState(DeviceState.IDLE);
+        await this.stopListeningAndSetIdle();
 
         if (this.protocol.isAudioChannelOpened()) {
             await this.protocol.closeAudioChannel();
@@ -469,7 +485,7 @@ export class Client {
             this.audioPlayer.stop();
         }
 
-        // 确保之前的监听已停止，为开始新的监听做准备
+        // 停止上一个监听（如果有），但不要改变状态
         await this.stopListening();
 
         // 立即开始新一轮监听

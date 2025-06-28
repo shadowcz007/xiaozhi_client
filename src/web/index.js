@@ -93,16 +93,16 @@ async function browserClient(port = 3000) {
         };
 
         const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
+        // const stopBtn = document.getElementById('stopBtn');
         const interruptBtn = document.getElementById('interruptBtn');
 
         if (startBtn) {
             startBtn.onclick = async() => {
                 try {
                     await client.startVoiceChat();
-                    startBtn.disabled = true;
+                    // startBtn.disabled = true;
                     // stopBtn.disabled = false;
-                    interruptBtn.disabled = false;
+                    // interruptBtn.disabled = false;
                 } catch (error) {
                     console.error(`❌ 启动失败: ${error.message}`);
                     showError('启动失败', error.message);
@@ -132,8 +132,8 @@ async function browserClient(port = 3000) {
                     console.error(`❌ 打断失败: ${error.message}`);
                     showError('打断失败', error.message);
                 }
-                startBtn.disabled = false;
-                interruptBtn.disabled = true;
+                // startBtn.disabled = false;
+                // interruptBtn.disabled = true;
             };
         }
 
