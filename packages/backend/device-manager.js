@@ -1,6 +1,6 @@
 // 管理设备
 
-import { DeviceActivator } from './src/device-activator.js';
+import { DeviceActivator } from '@xiaozhi/core';
 
 
 // 如果直接运行此文件，则启动激活流程

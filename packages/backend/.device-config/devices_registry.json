@@ -1,14 +1,14 @@
 {
-  "df:52:34:be:fa:38": {
-    "name": "mix",
+  "9b:9b:f3:50:dc:17": {
+    "name": "goodmate",
     "type": "virtual",
-    "serial_number": "SN-F81204C7-df5234befa38",
-    "registered_time": "2025-06-27T13:08:55.299Z",
-    "last_used": "2025-06-27T13:08:55.299Z",
+    "serial_number": "SN-ABB33169-9b9bf350dc17",
+    "registered_time": "2025-06-28T05:22:03.403Z",
+    "last_used": "2025-06-28T05:22:03.403Z",
     "fingerprint": {
       "system": "darwin",
       "hostname": "shadowdeMacBook-Pro-2.local",
-      "mac_address": "df:52:34:be:fa:38",
+      "mac_address": "9b:9b:f3:50:dc:17",
       "mac_type": "虚拟网卡",
       "cpu": {
         "model": "Intel(R) Core(TM) i5-8259U CPU @ 2.30GHz",
@@ -17,40 +17,40 @@
         "platform": "darwin"
       },
       "system_serial": "C02XJ07TJHC9",
-      "device_id": "df:52:34:be:fa:38",
+      "device_id": "9b:9b:f3:50:dc:17",
       "is_virtual": true,
-      "fingerprint_created_at": "2025-06-27T13:08:55.299Z",
+      "fingerprint_created_at": "2025-06-28T05:22:03.403Z",
+      "activation_status": false,
+      "device_name": "goodmate",
+      "device_type": "virtual",
+      "virtual_mac": "9b:9b:f3:50:dc:17"
+    }
+  },
+  "5b:c1:e9:62:89:ce": {
+    "name": "mix",
+    "type": "virtual",
+    "serial_number": "SN-B2AF6F52-5bc1e96289ce",
+    "registered_time": "2025-06-28T23:25:10.874Z",
+    "last_used": "2025-06-28T23:25:10.874Z",
+    "fingerprint": {
+      "system": "darwin",
+      "hostname": "shadowdeMacBook-Pro-2.local",
+      "mac_address": "5b:c1:e9:62:89:ce",
+      "mac_type": "虚拟网卡",
+      "cpu": {
+        "model": "Intel(R) Core(TM) i5-8259U CPU @ 2.30GHz",
+        "cores": 8,
+        "arch": "x64",
+        "platform": "darwin"
+      },
+      "system_serial": "C02XJ07TJHC9",
+      "device_id": "5b:c1:e9:62:89:ce",
+      "is_virtual": true,
+      "fingerprint_created_at": "2025-06-28T23:25:10.874Z",
       "activation_status": false,
       "device_name": "mix",
       "device_type": "virtual",
-      "virtual_mac": "df:52:34:be:fa:38"
-    }
-  },
-  "8a:fa:98:9d:01:a0": {
-    "name": "test",
-    "type": "virtual",
-    "serial_number": "SN-A0D22E29-8afa989d01a0",
-    "registered_time": "2025-06-27T13:24:05.722Z",
-    "last_used": "2025-06-27T13:24:05.722Z",
-    "fingerprint": {
-      "system": "darwin",
-      "hostname": "shadowdeMacBook-Pro-2.local",
-      "mac_address": "8a:fa:98:9d:01:a0",
-      "mac_type": "虚拟网卡",
-      "cpu": {
-        "model": "Intel(R) Core(TM) i5-8259U CPU @ 2.30GHz",
-        "cores": 8,
-        "arch": "x64",
-        "platform": "darwin"
-      },
-      "system_serial": "C02XJ07TJHC9",
-      "device_id": "8a:fa:98:9d:01:a0",
-      "is_virtual": true,
-      "fingerprint_created_at": "2025-06-27T13:24:05.722Z",
-      "activation_status": false,
-      "device_name": "test",
-      "device_type": "virtual",
-      "virtual_mac": "8a:fa:98:9d:01:a0"
+      "virtual_mac": "5b:c1:e9:62:89:ce"
     }
   }
 }

@@ -1,0 +1,48 @@
+/* Add your styles here */
+
+
+/* 全局样式重置 */
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+}
+
+#root {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+
+/* 基础样式 */
+
+button {
+    font-family: inherit;
+}
+
+
+/* 响应式设计 */
+
+@media (max-width: 768px) {
+    body {
+        margin: 10px;
+        padding: 10px;
+    }
+    .app-container {
+        padding: 1rem;
+        max-width: 100%;
+    }
+    .controls button {
+        display: block;
+        width: 100%;
+        margin: 10px 0;
+    }
+}

@@ -1,14 +1,18 @@
-import WebSocket from 'ws';
+import { IWebSocketProtocol } from '../../interfaces/audio-interfaces.js';
 import { EventEmitter } from 'events';
+import WebSocket from 'ws';
 import crypto from 'crypto';
 
 /**
- * WebSocket 协议类 - JavaScript 版本
- * 基于小智项目的 WebSocket 通信协议
+ * Node.js 环境下的 WebSocket 协议实现
+ * 基于 ws 库，封装原有的 WebSocketProtocol 功能
  */
-class WebSocketProtocol extends EventEmitter {
+export class NodeWebSocketProtocol extends IWebSocketProtocol {
     constructor(config = {}) {
-        super();
+        super(config);
+
+        // 继承 EventEmitter 功能
+        this.eventEmitter = new EventEmitter();
 
         // 音频配置常量
         this.AudioConfig = {
@@ -19,10 +23,9 @@ class WebSocketProtocol extends EventEmitter {
 
         // 连接状态
         this.websocket = null;
-        this.connected = false;
         this.helloReceived = false;
 
-        // 配置信息（从您提供的配置中获取）
+        // 配置信息
         this.config = {
             websocketUrl: config.websocketUrl || 'wss://api.tenclass.net/xiaozhi/v1/',
             accessToken: config.accessToken || 'test-token',
@@ -65,11 +68,11 @@ class WebSocketProtocol extends EventEmitter {
      */
     setupEventHandlers() {
         // 可以在这里设置默认的事件处理器
-        this.on('error', (error) => {
+        this.eventEmitter.on('error', (error) => {
             console.error('WebSocket协议错误:', error);
         });
 
-        this.on('networkError', (error) => {
+        this.eventEmitter.on('networkError', (error) => {
             console.error('网络错误:', error);
         });
     }
@@ -111,7 +114,7 @@ class WebSocketProtocol extends EventEmitter {
                             if (this.helloReceived) {
                                 clearTimeout(helloTimeout);
                                 this.connected = true;
-                                this.emit('connected');
+                                this.eventEmitter.emit('connected');
                                 resolve(true);
                             } else {
                                 setTimeout(checkHello, 100);
@@ -132,20 +135,20 @@ class WebSocketProtocol extends EventEmitter {
                 this.websocket.on('close', (code, reason) => {
                     clearTimeout(connectTimeout);
                     this.connected = false;
-                    this.emit('audioChannelClosed');
+                    this.eventEmitter.emit('audioChannelClosed');
                 });
 
                 this.websocket.on('error', (error) => {
                     clearTimeout(connectTimeout);
                     console.error('WebSocket 错误:', error);
-                    this.emit('networkError', `连接错误: ${error.message}`);
+                    this.eventEmitter.emit('networkError', `连接错误: ${error.message}`);
                     reject(error);
                 });
             });
 
         } catch (error) {
             console.error('WebSocket 连接失败:', error);
-            this.emit('networkError', `无法连接服务: ${error.message}`);
+            this.eventEmitter.emit('networkError', `无法连接服务: ${error.message}`);
             return false;
         }
     }
@@ -187,120 +190,100 @@ class WebSocketProtocol extends EventEmitter {
                         JSON.parse(messageStr);
                     } catch (jsonError) {
                         // 如果不是有效的 JSON，则当作音频数据处理
-                        this.emit('incomingAudio', data);
+                        this.eventEmitter.emit('incomingAudio', data);
                         return;
                     }
                 } else {
                     messageStr = data;
                 }
-                console.log('收到消息:', messageStr);
+                // console.log('收到消息:', messageStr);
                 // 处理 JSON 消息
                 try {
                     const jsonData = JSON.parse(messageStr);
                     const msgType = jsonData.type;
-                    // console.log('收到消息:', msgType);
+
                     if (msgType === 'hello') {
                         this.handleServerHello(jsonData);
                     } else {
-                        this.emit('incomingJson', jsonData);
+                        this.eventEmitter.emit('incomingJson', jsonData);
                     }
                 } catch (parseError) {
-                    console.error('JSON 解析失败:', parseError.message);
-                    console.error('原始消息:', messageStr);
+                    console.error('解析 JSON 消息失败:', parseError);
                 }
             } else {
-                // 二进制音频数据
-                this.emit('incomingAudio', data);
+                // 其他类型的数据当作音频数据处理
+                this.eventEmitter.emit('incomingAudio', data);
             }
-
         } catch (error) {
-            console.error('处理消息时出错:', error);
-            this.emit('error', error);
+            console.error('处理消息失败:', error);
         }
     }
 
     /**
-     * 处理服务器的 hello 消息
-     * @param {Object} data 服务器 hello 消息数据
+     * 处理服务器 hello 消息
      */
     handleServerHello(data) {
-        try {
-            // 验证传输方式 - 放宽验证条件
-            const transport = data.transport;
-            if (transport && transport !== 'websocket') {
-                console.warn('传输方式不匹配，但继续处理:', transport);
-            };
+        // console.log('收到服务器 hello 响应:', data);
 
-            console.log('收到服务器 hello 消息:', data);
-            // 设置 hello 接收状态
+        if (data.type == 'hello') {
             this.helloReceived = true;
+            this.sessionId = data.session_id;
 
-            this.audio_params = data.audio_params;
-            this.session_id = data.session_id;
+            // 触发音频通道打开事件
+            this.eventEmitter.emit('audioChannelOpened', data);
 
-            // 通知音频通道已打开
-            this.emit('audioChannelOpened');
-
-        } catch (error) {
-            console.error('处理服务器 hello 消息时出错:', error);
-            this.emit('networkError', `处理服务器响应失败: ${error.message}`);
+            console.log('✅ 服务器 hello 成功，会话 ID:', this.sessionId);
+        } else {
+            console.error('❌ 服务器 hello 失败:', data.message);
+            this.eventEmitter.emit('networkError', `服务器拒绝连接: ${data.message}`);
         }
     }
 
     /**
      * 发送音频数据
-     * @param {Buffer} data 音频数据
      */
     async sendAudio(data) {
-        if (!this.isAudioChannelOpened()) {
-            console.warn('音频通道未打开，无法发送音频数据');
-            return false;
+        if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
+            console.warn('WebSocket 连接已关闭，无法发送音频数据');
+            return;
         }
 
         try {
+            // console.log(`[WebSocket] Sending audio data: ${data.byteLength} bytes.`);
             this.websocket.send(data);
-            return true;
         } catch (error) {
             console.error('发送音频数据失败:', error);
-            this.emit('networkError', `发送音频数据失败: ${error.message}`);
-            return false;
+            throw error;
         }
     }
 
     /**
      * 发送文本消息
-     * @param {string} message 文本消息
      */
     async sendText(message) {
-        if (!this.websocket) {
-            console.error('WebSocket 连接不存在');
-            return false;
+        if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
+            console.warn('WebSocket 连接已关闭，无法发送文本消息:', message);
+            return;
         }
 
         try {
             this.websocket.send(message);
-            return true;
         } catch (error) {
             console.error('发送文本消息失败:', error);
-            await this.closeAudioChannel();
-            this.emit('networkError', '客户端已关闭');
-            return false;
+            throw error;
         }
     }
 
     /**
      * 检查音频通道是否打开
-     * @returns {boolean} 音频通道是否打开
      */
     isAudioChannelOpened() {
-        return this.websocket !== null &&
-            this.connected &&
-            this.websocket.readyState === WebSocket.OPEN;
+        return this.connected && this.helloReceived &&
+            this.websocket && this.websocket.readyState === WebSocket.OPEN;
     }
 
     /**
      * 打开音频通道
-     * @returns {Promise<boolean>} 是否成功打开
      */
     async openAudioChannel() {
         if (!this.connected) {
@@ -313,30 +296,28 @@ class WebSocketProtocol extends EventEmitter {
      * 关闭音频通道
      */
     async closeAudioChannel() {
-        if (this.websocket) {
-            try {
+        try {
+            if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
                 this.websocket.close();
-                this.websocket = null;
-                this.connected = false;
-                this.helloReceived = false;
-                this.emit('audioChannelClosed');
-            } catch (error) {
-                console.error('关闭 WebSocket 连接失败:', error);
             }
+            this.connected = false;
+            this.helloReceived = false;
+            this.sessionId = null;
+            console.log('✅ 音频通道已关闭');
+        } catch (error) {
+            console.error('关闭音频通道失败:', error);
         }
     }
 
     /**
-     * 获取连接状态
-     * @returns {boolean} 是否已连接
+     * 检查是否已连接
      */
     isConnected() {
-        return this.connected;
+        return this.connected && this.websocket && this.websocket.readyState === WebSocket.OPEN;
     }
 
     /**
      * 更新配置
-     * @param {Object} newConfig 新的配置
      */
     updateConfig(newConfig) {
         this.config = {...this.config, ...newConfig };
@@ -354,9 +335,42 @@ class WebSocketProtocol extends EventEmitter {
      * 销毁连接
      */
     destroy() {
-        this.closeAudioChannel();
-        this.removeAllListeners();
+        try {
+            this.closeAudioChannel();
+
+            if (this.websocket) {
+                this.websocket.removeAllListeners();
+                this.websocket = null;
+            }
+
+            if (this.eventEmitter) {
+                this.eventEmitter.removeAllListeners();
+            }
+
+            console.log('✅ WebSocket 协议已销毁');
+        } catch (error) {
+            console.error('销毁 WebSocket 协议失败:', error);
+        }
+    }
+
+    /**
+     * 事件监听 (EventEmitter 风格)
+     */
+    on(event, callback) {
+        this.eventEmitter.on(event, callback);
+    }
+
+    /**
+     * 移除事件监听
+     */
+    off(event, callback) {
+        this.eventEmitter.off(event, callback);
+    }
+
+    /**
+     * 触发事件
+     */
+    emit(event, ...args) {
+        this.eventEmitter.emit(event, ...args);
     }
 }
-
-export { WebSocketProtocol };

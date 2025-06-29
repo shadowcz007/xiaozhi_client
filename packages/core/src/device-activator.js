@@ -758,6 +758,7 @@ class DeviceActivator {
                 device_id: this.deviceFingerprint.deviceId,
                 payload,
                 headers,
+                data: response.data
             });
             return response.data;
         } catch (error) {
