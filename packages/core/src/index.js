@@ -7,10 +7,14 @@ import { Client } from './client.js';
 import { PlatformFactory } from './platform-factory.js';
 import { checkDeviceStatus } from './device-status.js';
 import { DeviceActivator } from './device-activator.js';
+import { BaseAwakener, KeyboardAwakener, HttpAwakener } from './device-awaker.js';
 
 export {
     Client,
     PlatformFactory,
     checkDeviceStatus,
-    DeviceActivator
+    DeviceActivator,
+    BaseAwakener,
+    KeyboardAwakener,
+    HttpAwakener
 };
