@@ -287,6 +287,22 @@ export class Client {
             return;
         }
 
+        // 确保 WebSocket 连接和音频通道都已就绪
+        try {
+            if (!this.protocol || !this.protocol.isConnected()) {
+                console.log('🔌 WebSocket 未连接，正在尝试连接...');
+                await this.protocol.connect();
+            }
+            if (!this.protocol.isAudioChannelOpened()) {
+                console.log('🎵 音频通道未打开，正在尝试打开...');
+                await this.protocol.openAudioChannel();
+            }
+        } catch (error) {
+            console.error('❌ 无法建立监听所需的连接:', error);
+            this.setDeviceState(DeviceState.IDLE); // 连接失败，设置为空闲
+            return;
+        }
+
         // 设置启动标志并清空缓冲区
         this.isStartingToListen = true;
         this.audioBuffer = [];
