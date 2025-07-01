@@ -241,7 +241,25 @@ impl Client {
             }
             Some("stop") => {
                 tracing::info!("🔇 AI回复播放完成");
-                Self::handle_tts_stop(device_state, player, keep_listening, aborted, callback, client).await;
+
+                let device_state_clone = Arc::clone(device_state);
+                let player_clone = Arc::clone(player);
+                let keep_listening_clone = Arc::clone(keep_listening);
+                let aborted_clone = Arc::clone(aborted);
+                let callback_clone = callback.clone();
+                let client_clone = Arc::clone(client);
+
+                tokio::spawn(async move {
+                    Self::handle_tts_stop(
+                        &device_state_clone,
+                        &player_clone,
+                        &keep_listening_clone,
+                        &aborted_clone,
+                        &callback_clone,
+                        &client_clone,
+                    )
+                    .await;
+                });
             }
             Some("interrupted") => {
                 tracing::info!("⚡ AI回复被打断");
