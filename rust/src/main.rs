@@ -2,8 +2,51 @@ use xiaozhi_client::{
     init_debug_logging, DeviceStatusChecker, Client, Config,
     types::ClientError
 };
-use std::io::{self, Write};
+use std::io::Write;
 use tokio::signal;
+
+// 交互模式的实现
+async fn interactive_mode(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
+    println!("🚀 启动交互模式...");
+    println!("💡 提示:");
+    println!("   - 输入 'start' 开始语音对话");
+    println!("   - 输入 'stop' 停止语音对话");
+    println!("   - 输入 'quit' 或 'exit' 退出程序");
+    println!("");
+
+    let mut input = String::new();
+    loop {
+        print!("> ");
+        std::io::stdout().flush()?;
+        
+        input.clear();
+        std::io::stdin().read_line(&mut input)?;
+        
+        let command = input.trim().to_lowercase();
+        
+        match command.as_str() {
+            "start" => {
+                println!("🎙️ 开始语音对话...");
+                client.start_voice_chat().await?;
+            }
+            "stop" => {
+                println!("🛑 停止语音对话...");
+                client.stop_voice_chat().await?;
+            }
+            "quit" | "exit" => {
+                println!("👋 正在退出...");
+                client.stop_voice_chat().await?;
+                client.disconnect().await?;
+                break;
+            }
+            _ => {
+                println!("❓ 未知命令，可用命令: start, stop, quit, exit");
+            }
+        }
+    }
+    
+    Ok(())
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -15,15 +58,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // 检查命令行参数
     let args: Vec<String> = std::env::args().collect();
-    let device_id = if args.len() > 1 {
-        args[1].clone()
+    
+    // 首先检查是否有 --interactive 标志
+    let interactive = args.iter().any(|arg| arg == "--interactive");
+    
+    // 获取非标志参数
+    let mut non_flag_args: Vec<String> = args.iter()
+        .filter(|arg| !arg.starts_with("--"))
+        .cloned()
+        .collect();
+    
+    // 移除程序名称
+    if !non_flag_args.is_empty() {
+        non_flag_args.remove(0);
+    }
+    
+    // 设置 device_id
+    let device_id = if !non_flag_args.is_empty() {
+        non_flag_args[0].clone()
     } else {
         // 使用默认设备ID
         "9b:9b:f3:50:dc:17".to_string()
     };
 
-    let name = if args.len() > 2 {
-        args[2].clone()
+    // 设置 name
+    let name = if non_flag_args.len() > 1 {
+        non_flag_args[1].clone()
     } else {
         "goodmate".to_string()
     };
@@ -33,7 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 创建设备状态检查器
     let checker = DeviceStatusChecker::new();
     
-    let status_response = match checker.check_device_status(&device_id,name.as_str()).await? {
+    let status_response = match checker.check_device_status(&device_id, name.as_str()).await? {
         Some(status) => {
             println!("✅ 设备已激活，开始初始化客户端...");
             status
@@ -61,122 +121,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("📱 状态变化: {:?}", state);
     });
     
-    println!("🚀 启动语音聊天...");
-    println!("💡 提示:");
-    println!("   - 客户端会自动开始语音对话");
-    println!("   - 按 Ctrl+C 退出程序");
-    println!("   - 首次启动会发送 'hi' 消息开始对话");
-    println!("");
-    
-    // 开始语音聊天
-    client.start_voice_chat().await?;
-    
-    println!("🎙️ 语音聊天已启动，等待交互...");
-    
-    // 等待中断信号
-    match signal::ctrl_c().await {
-        Ok(()) => {
-            println!("\n📱 收到退出信号，正在关闭...");
-            
-            // 停止语音聊天
-            if let Err(e) = client.stop_voice_chat().await {
-                eprintln!("⚠️ 停止语音聊天时出错: {}", e);
+    if interactive {
+        // 使用交互模式
+        interactive_mode(&client).await?;
+    } else {
+        // 使用自动模式
+        println!("🚀 启动语音聊天...");
+        println!("💡 提示:");
+        println!("   - 客户端会自动开始语音对话");
+        println!("   - 按 Ctrl+C 退出程序");
+        println!("   - 首次启动会发送 'hi' 消息开始对话");
+        println!("");
+        
+        // 开始语音聊天
+        client.start_voice_chat().await?;
+        
+        println!("🎙️ 语音聊天已启动，等待交互...");
+        
+        // 等待中断信号
+        match signal::ctrl_c().await {
+            Ok(()) => {
+                println!("\n📱 收到退出信号，正在关闭...");
+                
+                // 停止语音聊天
+                if let Err(e) = client.stop_voice_chat().await {
+                    eprintln!("⚠️ 停止语音聊天时出错: {}", e);
+                }
+                
+                // 断开连接
+                if let Err(e) = client.disconnect().await {
+                    eprintln!("⚠️ 断开连接时出错: {}", e);
+                }
+                
+                println!("✅ 程序已安全退出");
             }
-            
-            // 断开连接
-            if let Err(e) = client.disconnect().await {
-                eprintln!("⚠️ 断开连接时出错: {}", e);
+            Err(err) => {
+                eprintln!("❌ 监听退出信号时出错: {}", err);
+                return Err(err.into());
             }
-            
-            println!("✅ 程序已安全退出");
-        }
-        Err(err) => {
-            eprintln!("❌ 监听退出信号时出错: {}", err);
-            return Err(err.into());
         }
     }
     
     Ok(())
 }
 
-/// 交互式模式（备用实现）
-#[allow(dead_code)]
-async fn interactive_mode(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
-    println!("🎮 进入交互式模式");
-    println!("可用命令:");
-    println!("  start - 开始语音聊天");
-    println!("  stop  - 停止语音聊天");
-    println!("  text <message> - 发送文本消息");
-    println!("  interrupt - 打断当前对话");
-    println!("  status - 显示当前状态");
-    println!("  quit - 退出程序");
-    println!("");
-    
-    loop {
-        print!("xiaozhi> ");
-        io::stdout().flush()?;
-        
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        let input = input.trim();
-        
-        if input.is_empty() {
-            continue;
-        }
-        
-        let parts: Vec<&str> = input.splitn(2, ' ').collect();
-        let command = parts[0];
-        
-        match command {
-            "start" => {
-                println!("🚀 启动语音聊天...");
-                if let Err(e) = client.start_voice_chat().await {
-                    eprintln!("❌ 启动失败: {}", e);
-                }
-            }
-            "stop" => {
-                println!("🛑 停止语音聊天...");
-                if let Err(e) = client.stop_voice_chat().await {
-                    eprintln!("❌ 停止失败: {}", e);
-                }
-            }
-            "text" => {
-                if parts.len() > 1 {
-                    let message = parts[1];
-                    println!("💬 发送文本消息: {}", message);
-                    if let Err(e) = client.send_text_message(message).await {
-                        eprintln!("❌ 发送失败: {}", e);
-                    }
-                } else {
-                    eprintln!("❌ 请提供要发送的消息内容");
-                }
-            }
-            "interrupt" => {
-                println!("⚡ 打断当前对话...");
-                if let Err(e) = client.interrupt_conversation().await {
-                    eprintln!("❌ 打断失败: {}", e);
-                }
-            }
-            "status" => {
-                let state = client.get_device_state().await;
-                let is_recording = client.is_recording();
-                let keep_listening = client.is_keep_listening();
-                
-                println!("📱 当前状态:");
-                println!("   设备状态: {:?}", state);
-                println!("   正在录音: {}", is_recording);
-                println!("   持续监听: {}", keep_listening);
-            }
-            "quit" | "exit" => {
-                println!("👋 再见！");
-                break;
-            }
-            _ => {
-                eprintln!("❌ 未知命令: {}", command);
-                eprintln!("💡 输入 'quit' 退出程序");
-            }
-        }
-    }
-    
-    Ok(())
-} 
+
