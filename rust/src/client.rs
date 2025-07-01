@@ -439,8 +439,17 @@ impl Client {
 
         tracing::info!("🎤 开始监听，模式: {:?}", mode);
 
+        // 发送消息前，确保WebSocket是连接状态
+        let mut protocol_guard = self.protocol.lock().await;
+        if !protocol_guard.is_connected() {
+            tracing::info!("WebSocket未连接，正在重新连接...");
+            let new_event_receiver = protocol_guard.connect().await?;
+            // 重新连接后，需要重新启动事件处理循环
+            self.start_event_handling(new_event_receiver);
+        }
+        
         // 获取 Session ID，如果不存在则使用空字符串
-        let session_id = self.protocol.lock().await.get_session_id().await.unwrap_or_else(|| {
+        let session_id = protocol_guard.get_session_id().await.unwrap_or_else(|| {
             tracing::warn!("⚠️ 未获取到Session ID，将使用空字符串");
             String::new()
         });
@@ -459,12 +468,9 @@ impl Client {
         });
 
         // 发送消息
-        {
-            let mut protocol_guard = self.protocol.lock().await;
-            let message_text = serde_json::to_string(&message)?;
-            protocol_guard.send_text(&message_text).await?;
-            tracing::debug!("🎤 发送 listen:start 消息: {}", message_text);
-        }
+        let message_text = serde_json::to_string(&message)?;
+        protocol_guard.send_text(&message_text).await?;
+        tracing::debug!("🎤 发送 listen:start 消息: {}", message_text);
 
         self.set_device_state(DeviceState::Listening);
 
