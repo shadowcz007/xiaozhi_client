@@ -8,6 +8,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 use crate::types::{Result, ClientError, AudioParams, WebSocketMessage};
 use crate::config::Config;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// WebSocket事件类型
 #[derive(Debug, Clone)]
@@ -23,7 +24,7 @@ pub enum WebSocketEvent {
 /// WebSocket协议处理器
 pub struct WebSocketProtocol {
     config: Config,
-    connected: bool,
+    connected: Arc<AtomicBool>,
     hello_received: Arc<Mutex<bool>>,
     session_id: Arc<Mutex<Option<String>>>,
     event_sender: Option<mpsc::UnboundedSender<WebSocketEvent>>,
@@ -39,7 +40,7 @@ impl WebSocketProtocol {
     pub fn new(config: Config) -> Self {
         Self {
             config,
-            connected: false,
+            connected: Arc::new(AtomicBool::new(false)),
             hello_received: Arc::new(Mutex::new(false)),
             session_id: Arc::new(Mutex::new(None)),
             event_sender: None,
@@ -56,7 +57,7 @@ impl WebSocketProtocol {
             let mut hello_guard = self.hello_received.lock().await;
             *hello_guard = false;
         }
-        self.connected = false;
+        self.connected.store(false, Ordering::Relaxed);
         {
             let mut session_guard = self.session_id.lock().await;
             *session_guard = None;
@@ -141,10 +142,11 @@ impl WebSocketProtocol {
         tracing::info!("[调试] 发送的Hello消息: {}", serde_json::to_string_pretty(&hello_message)?);
 
         // 启动消息处理任务
-        let event_sender_clone = event_sender.clone(); 
+        let event_sender_clone = event_sender.clone();
         let hello_received_clone = Arc::clone(&self.hello_received);
         let session_id_clone = Arc::clone(&self.session_id);
-        
+        let connected_clone = Arc::clone(&self.connected);
+
         let _read_task = tokio::spawn(async move {
             let mut read = read;
             
@@ -180,6 +182,8 @@ impl WebSocketProtocol {
                     }
                 }
             }
+            tracing::debug!("WebSocket读取任务结束，设置connected为false");
+            connected_clone.store(false, Ordering::Relaxed);
         });
 
         // 等待Hello响应
@@ -190,7 +194,7 @@ impl WebSocketProtocol {
 
         match hello_timeout {
             Ok(Ok(_session_id)) => {
-                self.connected = true;
+                self.connected.store(true, Ordering::Relaxed);
                 let _ = event_sender.send(WebSocketEvent::Connected);
                 tracing::info!("✅ WebSocket连接成功");
             }
@@ -347,12 +351,12 @@ impl WebSocketProtocol {
     /// 检查音频通道是否打开
     pub async fn is_audio_channel_open(&self) -> bool {
         let hello_guard = self.hello_received.lock().await;
-        self.connected && *hello_guard
+        self.connected.load(Ordering::Relaxed) && *hello_guard
     }
 
     /// 检查是否已连接
     pub fn is_connected(&self) -> bool {
-        self.connected
+        self.connected.load(Ordering::Relaxed)
     }
 
     /// 获取会话ID
@@ -384,7 +388,7 @@ impl WebSocketProtocol {
             let _ = event_sender.send(WebSocketEvent::AudioChannelClosed);
         }
         
-        self.connected = false;
+        self.connected.store(false, Ordering::Relaxed);
         {
             let mut hello_guard = self.hello_received.lock().await;
             *hello_guard = false;
@@ -405,7 +409,7 @@ impl WebSocketProtocol {
 
     /// 销毁连接
     pub fn destroy(&mut self) {
-        self.connected = false;
+        self.connected.store(false, Ordering::Relaxed);
         self.event_sender = None;
         self.write_sender = None;
         tracing::info!("🔌 WebSocket协议已销毁");
@@ -445,7 +449,7 @@ mod tests {
         let config = Config::default();
         let protocol = WebSocketProtocol::new(config);
         
-        assert!(!protocol.connected);
+        assert!(!protocol.connected.load(Ordering::Relaxed));
         assert!(!protocol.is_audio_channel_open().await);
         assert!(protocol.get_session_id().await.is_none());
     }
