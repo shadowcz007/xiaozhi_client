@@ -3,15 +3,13 @@ import { checkDeviceStatus } from '@xiaozhi/core';
 
 import http from 'http';
 import { WebSocketServer } from 'ws';
-import path from 'path';
+
 import pkg from 'audify';
 const { OpusEncoder, OpusApplication } = pkg;
 
 // 导入我们已经验证可用的 Node.js WebSocket 客户端
 import { NodeWebSocketProtocol } from '../core/src/adapters/node/node-websocket.js';
 
-// 小知后端服务的真实地址
-const XIAOZHI_SERVICE_URL = 'wss://api.tenclass.net/xiaozhi/v1/';
 const PORT = 3000;
 
 // 创建一个 HTTP 服务器, 主要用于 WebSocket 的升级(upgrade)请求
