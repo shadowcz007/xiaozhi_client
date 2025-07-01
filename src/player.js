@@ -52,7 +52,7 @@ export class NodeAudioPlayer {
                 throw new Error('未找到可用的输出设备');
             }
 
-            // 尝试不同采样率
+            // 优先使用原始采样率，减少重新创建解码器的需要
             const sampleRates = [this.sampleRate, 48000, 44100, 22050];
             let actualSampleRate = this.sampleRate;
             let streamOpened = false;
@@ -97,9 +97,12 @@ export class NodeAudioPlayer {
 
             // 如果采样率不同，需要重新创建解码器
             if (actualSampleRate !== this.sampleRate) {
+                // 清空现有缓冲区，避免采样率不匹配的数据混合
+                this.audioBuffer = [];
                 this.decoder = new OpusDecoder(actualSampleRate, this.channels);
                 this.frameSize = Math.floor(actualSampleRate * 0.02); // 更新frameSize
                 console.log(`🔄 重新创建解码器，采样率: ${actualSampleRate}Hz, frameSize: ${this.frameSize}`);
+                console.log(`⚠️ 已清空音频缓冲区以避免采样率不匹配`);
             }
 
             return true;
@@ -128,11 +131,22 @@ export class NodeAudioPlayer {
             const frameSize = this.frameSize;
             // console.log(`🎵 解码音频: opusSize=${opusData.length}, frameSize=${frameSize}, sampleRate=${this.actualSampleRate || this.sampleRate}`);
 
-            const pcmData = this.decoder.decode(opusData, frameSize);
+            let pcmData;
+            try {
+                pcmData = this.decoder.decode(opusData, frameSize);
+            } catch (decodeError) {
+                console.error('🔊 Opus解码失败:', decodeError);
+                // 解码失败时，生成静音数据避免音频中断
+                const expectedSize = frameSize * this.channels * 2; // 16-bit = 2 bytes per sample
+                pcmData = Buffer.alloc(expectedSize, 0); // 填充静音
+                console.warn('🔊 使用静音数据替代解码失败的帧');
+            }
 
             if (!pcmData || pcmData.length === 0) {
-                console.warn('🔊 解码返回空PCM数据');
-                return;
+                console.warn('🔊 解码返回空PCM数据，生成静音帧');
+                // 生成一帧静音数据保持连续性
+                const expectedSize = frameSize * this.channels * 2;
+                pcmData = Buffer.alloc(expectedSize, 0);
             }
 
             // console.log(`✅ 解码成功: PCM长度=${pcmData.length}`);
@@ -140,7 +154,11 @@ export class NodeAudioPlayer {
             // 检查缓冲区是否过满，防止内存积累
             if (this.audioBuffer.length >= this.maxBufferSize) {
                 console.warn('🔊 音频缓冲区过满，丢弃旧数据');
-                this.audioBuffer.shift(); // 移除最旧的数据
+                // 丢弃一些旧数据，但不要一次丢弃太多
+                const dropCount = Math.min(5, this.audioBuffer.length - this.maxBufferSize + 1);
+                for (let i = 0; i < dropCount; i++) {
+                    this.audioBuffer.shift();
+                }
             }
 
             // 将音频数据添加到缓冲区
@@ -167,7 +185,10 @@ export class NodeAudioPlayer {
                 frameSize: this.frameSize,
                 decoderExists: !!this.decoder,
                 sampleRate: this.actualSampleRate || this.sampleRate,
-                channels: this.channels
+                channels: this.channels,
+                bufferLength: this.audioBuffer.length,
+                isPlaying: this.isPlaying,
+                streamOpened: this.streamOpened
             });
         }
     }
@@ -211,8 +232,24 @@ export class NodeAudioPlayer {
                 const expectedSize = this.frameSize * this.channels * 2; // 16-bit = 2 bytes per sample
 
                 if (pcmData.length !== expectedSize) {
-                    // 如果数据大小不匹配，跳过这帧数据
-                    console.warn(`🔊 PCM数据大小不匹配: 期望${expectedSize}字节，实际${pcmData.length}字节`);
+                    // 如果数据大小不匹配，尝试调整数据而不是直接跳过
+                    console.warn(`🔊 PCM数据大小不匹配: 期望${expectedSize}字节，实际${pcmData.length}字节，尝试调整`);
+
+                    let adjustedData;
+                    if (pcmData.length > expectedSize) {
+                        // 数据过长，截断
+                        adjustedData = pcmData.slice(0, expectedSize);
+                        console.warn(`🔊 截断音频数据至${expectedSize}字节`);
+                    } else {
+                        // 数据过短，用静音填充
+                        adjustedData = Buffer.alloc(expectedSize);
+                        pcmData.copy(adjustedData, 0);
+                        // 剩余部分已经是0（静音）
+                        console.warn(`🔊 音频数据用静音填充至${expectedSize}字节`);
+                    }
+
+                    // 使用调整后的数据
+                    this.rtAudio.write(adjustedData);
                     writeCount++;
                     continue;
                 }
