@@ -1,5 +1,5 @@
 use xiaozhi_client::{
-    init_debug_logging, DeviceStatusChecker, Client, Config,
+    init_logging, DeviceStatusChecker, Client, Config,
     types::ClientError
 };
 use std::io::Write;
@@ -54,8 +54,8 @@ async fn interactive_mode(client: &Client) -> Result<(), Box<dyn std::error::Err
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 初始化日志记录
-    init_debug_logging();
+    // 初始化日志记录（使用环境变量设置）
+    init_logging();
     
     println!("🤖 小智语音助手 Rust 客户端");
     println!("================================");

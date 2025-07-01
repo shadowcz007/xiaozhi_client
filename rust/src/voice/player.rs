@@ -50,8 +50,8 @@ impl NodeAudioPlayer {
             sample_rate,
             channels,
             frame_size,
-            buffer_size: 5,        // 初始缓冲帧数
-            max_buffer_size: 50,   // 最大缓冲区限制
+            buffer_size: 10,        // 初始缓冲帧数
+            max_buffer_size: 100,   // 最大缓冲区限制
             last_data_time: Arc::new(Mutex::new(Instant::now())),
             playback_finished_callback: None,
         })
