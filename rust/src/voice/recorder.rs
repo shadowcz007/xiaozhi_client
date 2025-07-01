@@ -219,7 +219,7 @@ impl MicrophoneOpusRecorder {
         is_recording: Arc<AtomicBool>,
         opus_sender: mpsc::UnboundedSender<Vec<u8>>,
         frame_size: usize,
-        expected_sample_rate: u32,
+        _expected_sample_rate: u32,
     ) -> Result<Stream>
     where
         T: cpal::Sample + cpal::SizedSample,

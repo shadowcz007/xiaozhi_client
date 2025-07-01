@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use thiserror::Error;
 
 /// 客户端操作结果类型
 pub type Result<T> = std::result::Result<T, ClientError>;

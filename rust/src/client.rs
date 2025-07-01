@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::types::{DeviceState, ListeningMode, Result, ClientError};
+use crate::types::{DeviceState, ListeningMode, Result};
 use crate::config::Config;
 use crate::websocket::{WebSocketProtocol, WebSocketEvent};
 use crate::voice::{MicrophoneOpusRecorder, NodeAudioPlayer};

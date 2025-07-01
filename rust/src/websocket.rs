@@ -1,12 +1,12 @@
 use tokio_tungstenite::{connect_async_with_config, tungstenite::{Message, client::IntoClientRequest}};
 use futures::{SinkExt, StreamExt};
-use std::collections::HashMap;
+
 use std::time::Duration;
 use tokio::time::timeout;
 use tokio::sync::{mpsc, Mutex};
 use std::sync::Arc;
 use uuid::Uuid;
-use crate::types::{Result, ClientError, AudioParams, WebSocketMessage};
+use crate::types::{Result, ClientError};
 use crate::config::Config;
 use std::sync::atomic::{AtomicBool, Ordering};
 
