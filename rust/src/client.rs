@@ -95,6 +95,9 @@ impl Client {
         // 如果提供了hello消息，则发送欢迎消息开始对话
         if let Some(hello_text) = hello {
             self.send_text_message(hello_text).await?;
+        }else{
+            // 如果没有 hello 消息,直接开始监听
+            self.start_listening(ListeningMode::AlwaysOn).await?;
         }
 
         Ok(())
