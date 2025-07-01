@@ -331,13 +331,22 @@ impl Client {
         let max_wait_time = Duration::from_secs(30);
         let start_time = std::time::Instant::now();
 
-        loop {
-                    let is_playing = {
-            let player_guard = player.lock().await;
-            player_guard.is_playing()
-        };
+        // 给予播放器一个缓冲时间来开始播放，增加到200ms以应对初始延迟
+        tokio::time::sleep(Duration::from_millis(200)).await;
 
-            if !is_playing || start_time.elapsed() > max_wait_time {
+        loop {
+            let (is_playing_now, buffer_len) = {
+                let player_guard = player.lock().await;
+                (player_guard.is_playing(), player_guard.get_buffer_status().0)
+            };
+
+            // 当播放器报告未在播放且其缓冲区也为空时，我们才认为播放已真正结束
+            if !is_playing_now && buffer_len == 0 {
+                break;
+            }
+
+            if start_time.elapsed() > max_wait_time {
+                tracing::warn!("等待音频播放完成超时 (is_playing: {}, buffer: {})", is_playing_now, buffer_len);
                 break;
             }
 
