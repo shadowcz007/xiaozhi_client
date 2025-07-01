@@ -20,7 +20,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// 初始化日志记录
 pub fn init_logging() {
     let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+        .unwrap_or_else(|_| EnvFilter::new("error"));
     
     fmt()
         .with_target(false)
