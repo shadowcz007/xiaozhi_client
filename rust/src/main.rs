@@ -27,7 +27,7 @@ async fn interactive_mode(client: &Client) -> Result<(), Box<dyn std::error::Err
         match command.as_str() {
             "start" => {
                 println!("🎙️ 开始语音对话...");
-                client.start_voice_chat().await?;
+                client.start_voice_chat(None).await?;
             }
             "stop" => {
                 println!("🛑 停止语音对话...");
@@ -134,7 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("");
         
         // 开始语音聊天
-        client.start_voice_chat().await?;
+        client.start_voice_chat(Some("hi，打个招呼吧")).await?;
         
         println!("🎙️ 语音聊天已启动，等待交互...");
         

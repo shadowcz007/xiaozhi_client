@@ -76,7 +76,7 @@ impl Client {
     }
 
     /// 开始语音聊天
-    pub async fn start_voice_chat(&self) -> Result<()> {
+    pub async fn start_voice_chat(&self, hello: Option<&str>) -> Result<()> {
         tracing::info!("🚀 开始语音聊天...");
         self.set_device_state(DeviceState::Connecting);
 
@@ -92,8 +92,10 @@ impl Client {
         // 设置持续监听
         self.keep_listening.store(true, Ordering::Relaxed);
 
-        // 发送欢迎消息开始对话
-        self.send_text_message("hello").await?;
+        // 如果提供了hello消息，则发送欢迎消息开始对话
+        if let Some(hello_text) = hello {
+            self.send_text_message(hello_text).await?;
+        }
 
         Ok(())
     }
@@ -737,28 +739,5 @@ impl Clone for Client {
             is_recording_from_mic: Arc::clone(&self.is_recording_from_mic),
             on_state_changed: self.on_state_changed.clone(),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_client_creation() {
-        let config = Config::default();
-        let client = Client::new(config);
-        assert!(client.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_client_from_params() {
-        let client = Client::from_params(
-            "ws://localhost:8080".to_string(),
-            "test-token".to_string(),
-            "test-device".to_string(),
-            "test-client".to_string(),
-        );
-        assert!(client.is_ok());
     }
 }

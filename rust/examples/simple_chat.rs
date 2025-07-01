@@ -78,7 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🚀 启动语音聊天...");
     
     // 开始语音聊天
-    client.start_voice_chat().await?;
+    client.start_voice_chat(Some("hello")).await?;
     
     println!("💬 发送欢迎消息开始对话...");
     
@@ -152,7 +152,7 @@ async fn long_running_example() -> Result<(), Box<dyn std::error::Error>> {
     });
     
     // 启动语音聊天
-    client.start_voice_chat().await?;
+    client.start_voice_chat(Some("hello")).await?;
     
     // 定期发送消息进行交互
     let messages = vec![
