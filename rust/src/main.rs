@@ -14,6 +14,10 @@ async fn interactive_mode(client: &Client) -> Result<(), Box<dyn std::error::Err
     println!("   - 输入 'quit' 或 'exit' 退出程序");
     println!("");
 
+    // 自动启动语音对话
+    println!("🎙️ 自动启动语音对话...");
+    client.start_voice_chat(Some("我是shadow，很高兴见到你")).await?;
+
     let mut input = String::new();
     loop {
         print!("> ");

@@ -160,7 +160,7 @@ impl WebSocketProtocol {
                         }
                     }
                     Ok(Message::Binary(data)) => {
-                        tracing::debug!("收到二进制数据: {} bytes", data.len());
+                        // tracing::debug!("收到二进制数据: {} bytes", data.len());
                         let _ = event_sender_clone.send(WebSocketEvent::IncomingAudio(data));
                     }
                     Ok(Message::Close(_)) => {
