@@ -386,7 +386,19 @@ impl Client {
             if old_state != new_state {
                 *state_guard = new_state;
                 
-                tracing::debug!("📱 设备状态变化: {:?} -> {:?}", old_state, new_state);
+                // 添加表情和状态输出
+                let status_emoji = match new_state {
+                    DeviceState::Idle => "💤",
+                    DeviceState::Connecting => "🔄",
+                    DeviceState::Listening => "👂",
+                    DeviceState::Speaking => "🗣️",
+                };
+                
+                println!("{} 状态变化: {} -> {}", 
+                    status_emoji,
+                    old_state,
+                    new_state
+                );
                 
                 // 调用状态变化回调
                 if let Some(callback) = &callback {
@@ -641,52 +653,14 @@ impl Client {
 
     /// 打断当前对话
     pub async fn interrupt_conversation(&self) -> Result<()> {
-        tracing::info!("⚡ 打断当前对话");
-        
-        let current_state = self.get_device_state().await;
-        
-        match current_state {
-                         DeviceState::Speaking => {
-                 // 停止音频播放
-                 {
-                     let mut player_guard = self.player.lock().await;
-                     player_guard.stop();
-                 }
-                
-                // 设置打断标志
-                self.aborted.store(true, Ordering::Relaxed);
-                
-                // 发送打断消息
-                let interrupt_message = serde_json::json!({
-                    "type": "interrupt",
-                    "timestamp": chrono::Utc::now().timestamp_millis()
-                });
-                
-                                 {
-                     let mut protocol_guard = self.protocol.lock().await;
-                     let message_text = serde_json::to_string(&interrupt_message)?;
-                     protocol_guard.send_text(&message_text).await?;
-                 }
-                
-                // 开始新的监听
-                if self.keep_listening.load(Ordering::Relaxed) {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    self.start_listening(ListeningMode::AlwaysOn).await?;
-                }
-            }
-            DeviceState::Listening => {
-                // 如果正在监听，重新开始监听
-                if let Err(e) = self.stop_listening().await {
-                    tracing::warn!("停止监听失败: {}", e);
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                self.start_listening(ListeningMode::AlwaysOn).await?;
-            }
-            _ => {
-                tracing::debug!("当前状态不需要打断: {:?}", current_state);
-            }
-        }
-        
+        self.aborted.store(true, Ordering::SeqCst);
+        self.stop_listening_and_set_idle().await
+    }
+
+    /// 停止监听并设置为空闲状态
+    pub async fn stop_listening_and_set_idle(&self) -> Result<()> {
+        self.stop_listening().await?;
+        self.set_device_state(DeviceState::Idle);
         Ok(())
     }
 

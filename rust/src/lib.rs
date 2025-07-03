@@ -4,6 +4,7 @@ pub mod websocket;
 pub mod voice;
 pub mod client;
 pub mod config;
+mod stdio_controller;
 
 pub use types::*;
 pub use device_status::DeviceStatusChecker;
@@ -11,6 +12,7 @@ pub use websocket::WebSocketProtocol;
 pub use voice::{MicrophoneOpusRecorder, NodeAudioPlayer};
 pub use client::Client;
 pub use config::Config;
+pub use stdio_controller::StdioController;
 
 use tracing_subscriber::{fmt, EnvFilter};
 
