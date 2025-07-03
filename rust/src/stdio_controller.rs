@@ -15,7 +15,7 @@ impl StdioController {
     }
 
     /// 启动命令行控制
-    pub async fn start(&self) {
+    pub async fn start(&self) -> anyhow::Result<()> {
         let stdin = io::stdin();
         let reader = BufReader::new(stdin);
         let mut lines = reader.lines();
@@ -26,6 +26,8 @@ impl StdioController {
         println!("2. always - 开始监听 (持续模式)");
         println!("3. interrupt - 打断当前对话");
         println!("4. quit - 退出程序\n");
+
+        self.client.start_voice_chat(Some("hi")).await?;
 
         while let Ok(Some(line)) = lines.next_line().await {
             let command = line.trim().to_lowercase();
@@ -64,5 +66,7 @@ impl StdioController {
                 }
             }
         }
+
+        Ok(())
     }
 } 
