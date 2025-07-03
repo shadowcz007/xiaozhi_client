@@ -1,11 +1,11 @@
 use xiaozhi_client::{
-    init_logging, DeviceStatusChecker, Client, Config, StdioController,
-    types::ClientError
+    init_logging, DeviceStatusChecker, Client, Config, StdioController
 };
 use std::io::Write;
 use std::sync::Arc;
 
 // 交互模式的实现
+#[allow(dead_code)]
 async fn interactive_mode(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
     println!("🚀 启动交互模式...");
     println!("💡 提示:");
@@ -102,7 +102,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         
         // 启动异步任务
         tokio::spawn(async move {
-            controller.start().await;
+            if let Err(e) = controller.start().await {
+                eprintln!("❌ 控制器启动错误: {:?}", e);
+            }
         });
         
         // 等待程序退出信号
