@@ -3,6 +3,11 @@ use xiaozhi_client::{
 };
 use std::io::Write;
 use std::sync::Arc;
+use std::process;
+use clap::{Arg, Command};
+
+mod crypto;
+use crypto::LicenseVerifier;
 
 // 交互模式的实现
 #[allow(dead_code)]
@@ -54,18 +59,80 @@ async fn interactive_mode(client: &Client) -> Result<(), Box<dyn std::error::Err
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 解析命令行参数
+    let matches = Command::new("XiaoZhi Client")
+        .version("0.1.0")
+        .author("shadow")
+        .about("小智语音助手客户端")
+        .arg(
+            Arg::new("key")
+                .long("key")
+                .value_name("ENCODED_KEY")
+                .help("Base64 编码的许可证密钥")
+                .required(false)  // 开发环境下不强制要求
+        )
+        .arg(
+            Arg::new("device-id")
+                .long("device-id")
+                .value_name("DEVICE_ID")
+                .help("设备ID")
+                .default_value("9b:9b:f3:50:dc:17")
+        )
+        .arg(
+            Arg::new("device-name")
+                .long("device-name")
+                .value_name("DEVICE_NAME")
+                .help("设备名称")
+                .default_value("goodmate")
+        )
+        .get_matches();
+
+    // 在开发环境中使用默认的测试许可证
+    let encoded_key = if cfg!(debug_assertions) {
+        matches.get_one::<String>("key").map(|s| s.as_str()).unwrap_or(
+            "eyJsaWNlbnNlIjoidGVzdC1saWNlbnNlIiwicGFzc3dvcmQiOiJ0ZXN0LXBhc3N3b3JkIn0="
+        )
+    } else {
+        matches.get_one::<String>("key")
+            .map(|s| s.as_str())
+            .ok_or("生产环境需要提供许可证密钥")?
+    };
+
+    // 初始化验证器
+    let verifier = LicenseVerifier::new();
+
+    // 在开发环境中，如果验证器初始化失败，跳过验证
+    if !cfg!(debug_assertions) {
+        // 解码并验证 license
+        let license_key = match LicenseVerifier::decode_license_key(encoded_key) {
+            Ok(key) => key,
+            Err(e) => {
+                eprintln!("❌ 无效的密钥格式: {}", e);
+                eprintln!("💡 请使用正确的 base64 编码格式的许可证密钥");
+                process::exit(1);
+            }
+        };
+
+        match verifier.verify_license(&license_key) {
+            Ok(true) => println!("✅ 许可证验证成功"),
+            Ok(false) => {
+                eprintln!("❌ 无效的许可证");
+                eprintln!("💡 请联系管理员获取有效的许可证");
+                process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("❌ 许可证验证失败: {}", e);
+                process::exit(1);
+            }
+        }
+    }
+
     // 初始化日志
     init_logging();
     
-    // 获取设备ID（从命令行参数或使用默认值）
-    let device_id = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "9b:9b:f3:50:dc:17".to_string());
-        
-    // 获取设备名称（从命令行参数或使用默认值）
-    let device_name = std::env::args()
-        .nth(2)
-        .unwrap_or_else(|| "goodmate".to_string());
+    // 获取设备ID和设备名称
+    let device_id = matches.get_one::<String>("device-id").unwrap();
+    let device_name = matches.get_one::<String>("device-name").unwrap();
     
     println!("🔍 正在检查设备状态...");
     println!("📱 设备ID: {}", device_id);
@@ -82,7 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let config = Config::new(
             status_response.websocket.url,
             status_response.websocket.token,
-            device_id,
+            device_id.to_string(),
             status_response.mqtt.client_id,
         );
         

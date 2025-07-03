@@ -28,6 +28,9 @@ Thumbs.db
 .env
 .env.local
 
+# 加密配置文件（不应包含在版本控制中）
+config/crypto_config.json
+
 # 临时文件
 *.tmp
 *.temp
