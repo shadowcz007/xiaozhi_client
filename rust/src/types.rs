@@ -11,6 +11,8 @@ pub enum DeviceState {
     Idle,
     /// 连接中
     Connecting,
+    /// 等待回复中
+    Processing,
     /// 监听中
     Listening,
     /// 播放中
@@ -22,6 +24,7 @@ impl fmt::Display for DeviceState {
         match self {
             DeviceState::Idle => write!(f, "空闲"),
             DeviceState::Connecting => write!(f, "连接中"),
+            DeviceState::Processing => write!(f, "处理中"),
             DeviceState::Listening => write!(f, "监听中"),
             DeviceState::Speaking => write!(f, "播放中"),
         }

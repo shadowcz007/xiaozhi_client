@@ -179,6 +179,9 @@ impl Client {
 
         let msg_type = json_data.get("type").and_then(|v| v.as_str());
 
+        // 调试输出所有收到的消息类型和内容
+        // println!("🔍 收到消息类型: {:?}, 完整数据: {}", msg_type, serde_json::to_string_pretty(&json_data).unwrap_or_default());
+        
         match msg_type {
             Some("tts") => {
                 Self::handle_tts_message(json_data, device_state, player, keep_listening, aborted, callback, client).await;
@@ -190,15 +193,22 @@ impl Client {
                 Self::handle_llm_message(json_data);
                 
                 // 在收到LLM消息后，自动开始监听
-                let mut state_guard = device_state.lock().await;
-                if *state_guard == DeviceState::Idle && keep_listening.load(Ordering::Relaxed) {
-                    *state_guard = DeviceState::Listening;
-                    if let Some(cb) = callback {
-                        cb(DeviceState::Listening);
-                    }
-                    tracing::info!("🎤 收到LLM消息后自动开始监听");
+                let current_state = {
+                    let state_guard = device_state.lock().await;
+                    *state_guard
+                };
+                
+                // 从Processing或Idle状态都可以开始监听
+                if (current_state == DeviceState::Processing || current_state == DeviceState::Idle) 
+                   && keep_listening.load(Ordering::Relaxed) {
+                    tracing::info!("🎤 收到LLM消息，从{}状态准备开始监听", current_state);
                     
-                    // 不再需要启动新任务，因为状态变化会在start_event_handling中处理
+                    // 实际启动监听功能
+                    if let Err(e) = client.start_listening(ListeningMode::AlwaysOn).await {
+                        tracing::error!("收到LLM消息后启动监听失败: {}", e);
+                    } else {
+                        tracing::info!("✅ 收到LLM消息后成功启动监听");
+                    }
                 }
             }
             Some("error") => {
@@ -206,8 +216,13 @@ impl Client {
                     tracing::warn!("⚠️ 服务器错误: {}", message);
                 }
             }
-            _ => {
-                tracing::info!("📋 其他消息: {:?}", json_data);
+            Some(other_type) => {
+                println!("📋 其他类型消息: {}, 数据: {}", other_type, serde_json::to_string_pretty(&json_data).unwrap_or_default());
+                tracing::info!("📋 其他消息类型: {}, 数据: {:?}", other_type, json_data);
+            }
+            None => {
+                println!("⚠️ 消息没有type字段: {}", serde_json::to_string_pretty(&json_data).unwrap_or_default());
+                tracing::info!("⚠️ 无类型消息: {:?}", json_data);
             }
         }
     }
@@ -226,7 +241,14 @@ impl Client {
 
         match state {
             Some("start") => {
+                println!("🗣️ 开始播放AI回复");
                 tracing::info!("🗣️ 开始播放AI回复");
+            }
+            Some("sentence_start") => {
+                if let Some(text) = data.get("text").and_then(|v| v.as_str()) {
+                    println!("🗣️ TTS: {}", text);
+                    tracing::info!("🗣️ TTS文本: {}", text);
+                }
                 
                 // 在TTS开始时强制停止录音，确保状态一致性
                 let was_recording = client.is_recording_from_mic.load(Ordering::Relaxed);
@@ -245,6 +267,11 @@ impl Client {
                 aborted.store(false, Ordering::Relaxed);
             }
             Some("stop") => {
+                // 调试输出完整的TTS stop消息数据
+                // println!("🔍 TTS stop完整数据: {}", serde_json::to_string_pretty(&data).unwrap_or_default());
+                tracing::info!("🔍 TTS stop消息结构: {:?}", data);
+
+                println!("🔇 AI播放完成");
                 tracing::info!("🔇 AI回复播放完成");
 
                 Self::handle_tts_stop(
@@ -364,14 +391,20 @@ impl Client {
     /// 处理STT消息
     fn handle_stt_message(data: serde_json::Value) {
         if let Some(text) = data.get("text").and_then(|v| v.as_str()) {
+            println!("🎤 语音识别: {}", text);
             tracing::info!("🎤 语音识别结果: {}", text);
         }
     }
 
     /// 处理LLM消息
     fn handle_llm_message(data: serde_json::Value) {
-        if let Some(content) = data.get("content").and_then(|v| v.as_str()) {
-            tracing::info!("💬 AI回复内容: {}", content);
+        if let Some(emotion) = data.get("emotion").and_then(|v| v.as_str()) {
+            println!("💬 AI回复: {}", emotion);
+            tracing::info!("💬 AI回复内容: {}", emotion);
+        } else {
+            println!("⚠️ 未找到AI回复内容 (emotion字段)");
+            // 调试输出完整数据以便检查
+            println!("🔍 LLM完整数据: {}", serde_json::to_string_pretty(&data).unwrap_or_default());
         }
     }
 
@@ -390,6 +423,7 @@ impl Client {
                 let status_emoji = match new_state {
                     DeviceState::Idle => "💤",
                     DeviceState::Connecting => "🔄",
+                    DeviceState::Processing => "⏳",
                     DeviceState::Listening => "👂",
                     DeviceState::Speaking => "🗣️",
                 };
@@ -410,6 +444,7 @@ impl Client {
 
     /// 发送文本消息
     pub async fn send_text_message(&self, text: &str) -> Result<()> {
+        println!("✉️  发送消息: {}", text);
         tracing::info!("✉️  发送文本消息: {}", text);
         let session_id = {
             let protocol_guard = self.protocol.lock().await;
@@ -439,10 +474,9 @@ impl Client {
                 tracing::info!("[调试] 文本消息已发送: {}", message_text);
             }
 
-            // 设置为持续监听模式并开始监听
-            if let Err(e) = self.start_listening(ListeningMode::AlwaysOn).await {
-                tracing::error!("自动开始监听失败: {}", e);
-            }
+            // 发送文本消息后，设置状态为处理中，等待服务器回复
+            self.set_device_state(DeviceState::Processing);
+            tracing::info!("✅ 文本消息已发送，等待服务器处理...");
         } else {
             tracing::warn!("⚠️ 未获取到Session ID，无法发送消息");
         }
@@ -472,6 +506,7 @@ impl Client {
             tracing::debug!("🔍 停止录音后状态检查: is_recording={}", new_recording_state);
         }
 
+        println!("🎤 开始监听...");
         tracing::info!("🎤 开始监听，模式: {:?}", mode);
 
         // 发送消息前，确保WebSocket是连接状态
@@ -534,6 +569,7 @@ impl Client {
             return Ok(());
         }
 
+        println!("🛑 停止监听");
         tracing::info!("🛑 停止监听");
         
         // 停止麦克风录音
