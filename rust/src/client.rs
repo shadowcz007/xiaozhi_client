@@ -180,7 +180,7 @@ impl Client {
         let msg_type = json_data.get("type").and_then(|v| v.as_str());
 
         // 调试输出所有收到的消息类型和内容
-        // println!("🔍 收到消息类型: {:?}, 完整数据: {}", msg_type, serde_json::to_string_pretty(&json_data).unwrap_or_default());
+        println!("🔍 收到消息类型: {:?}, 完整数据: {}", msg_type, serde_json::to_string_pretty(&json_data).unwrap_or_default());
         
         match msg_type {
             Some("tts") => {
