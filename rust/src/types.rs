@@ -201,6 +201,9 @@ pub enum ClientError {
 
     #[error("设备未激活")]
     DeviceNotActivated,
+
+    #[error("系统时间错误: {0}")]
+    SystemTimeError(#[from] std::time::SystemTimeError),
 }
 
 impl From<String> for ClientError {
