@@ -6,6 +6,7 @@ use tracing::{info, error, debug};
 use opus::{Encoder as OpusEncoder, Decoder as OpusDecoder};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 const OPUS_FRAME_SIZE_MS: u32 = 20; // 20ms 的帧大小
 const MAX_PACKET_SIZE: usize = 1500; // 最大包大小
@@ -242,10 +243,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("📝 准备开始录音...");
     let mut all_encoded_data = Vec::<Vec<u8>>::new();
     
-    let config = cpal::StreamConfig {
+    // 创建输入流配置
+    let input_config = cpal::StreamConfig {
         channels,
         sample_rate: cpal::SampleRate(sample_rate),
         buffer_size: cpal::BufferSize::Fixed(frame_size as u32),
+    };
+
+    // 创建输出流配置 - 使用默认缓冲区大小
+    let output_config = cpal::StreamConfig {
+        channels,
+        sample_rate: cpal::SampleRate(sample_rate),
+        buffer_size: cpal::BufferSize::Default,
     };
 
     // 创建输入流
@@ -253,7 +262,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut opus_output = vec![0u8; MAX_PACKET_SIZE];
     
     let input_stream = input_device.build_input_stream(
-        &config,
+        &input_config,
         move |data: &[f32], _: &cpal::InputCallbackInfo| {
             let frame_num = frame_counter_clone.fetch_add(1, Ordering::SeqCst);
             let (rms, min, max) = calculate_audio_stats(data);
@@ -265,11 +274,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             input_data.extend_from_slice(data);
             
-            // 当收集够一帧数据时进行编码
-            if input_data.len() >= frame_size * channels as usize {
+            // 当收集够一帧或多帧数据时进行编码
+            while input_data.len() >= frame_size * channels as usize {
                 let mut pcm = vec![0f32; frame_size * channels as usize];
                 pcm.copy_from_slice(&input_data[..frame_size * channels as usize]);
-                input_data.clear();
+                input_data.drain(..frame_size * channels as usize);
                 
                 // 编码
                 if let Ok(encoded_len) = encoder.encode_float(&pcm, &mut opus_output) {
@@ -308,38 +317,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ===== 第二阶段：播放 =====
     info!("🔊 准备开始播放录音...");
     
-    // 使用选择的输出设备
     let mut encoded_data_iter = all_encoded_data.into_iter();
-    
-    // 创建一个可重用的缓冲区
     let buffer_size = frame_size * channels as usize;
     let mut last_good_frame = vec![0f32; buffer_size];
     let mut consecutive_errors = 0;
     
+    // 创建计时器来控制播放速率
+    let frame_duration = Duration::from_millis(OPUS_FRAME_SIZE_MS as u64);
+    let mut last_frame_time = Instant::now();
+    
     let output_stream = output_device.build_output_stream(
-        &config,
+        &output_config,
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+            // 控制播放速率
+            let now = Instant::now();
+            let elapsed = now.duration_since(last_frame_time);
+            
+            if elapsed < frame_duration {
+                // 如果距离上一帧时间不够，就重复播放上一帧的数据
+                let len = data.len().min(last_good_frame.len());
+                data[..len].copy_from_slice(&last_good_frame[..len]);
+                if len < data.len() {
+                    data[len..].fill(0.0);
+                }
+                return;
+            }
+            
+            last_frame_time = now;
+            
             if let Some(encoded_data) = encoded_data_iter.next() {
-                // 确保解码缓冲区大小与播放缓冲区匹配
                 let mut decoded = vec![0f32; buffer_size];
                 
                 match decoder.decode_float(&encoded_data, &mut decoded, false) {
                     Ok(_) => {
-                        // 应用简单的平滑处理，确保不会越界
                         let len = data.len().min(decoded.len()).min(last_good_frame.len());
-                        for i in 1..len {
-                            decoded[i] = decoded[i] * 0.9 + last_good_frame[i] * 0.1;
+                        for i in 0..len {
+                            decoded[i] = decoded[i] * 0.95 + last_good_frame[i] * 0.05;
                         }
                         
-                        // 更新最后一个好帧并重置错误计数
                         last_good_frame[..len].copy_from_slice(&decoded[..len]);
                         consecutive_errors = 0;
                         
-                        // 复制处理后的数据到输出缓冲区
                         let copy_len = data.len().min(decoded.len());
                         data[..copy_len].copy_from_slice(&decoded[..copy_len]);
                         
-                        // 如果还有剩余的输出缓冲区，填充静音
                         if copy_len < data.len() {
                             data[copy_len..].fill(0.0);
                         }
@@ -349,34 +370,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         error!("解码错误: {}, 连续错误次数: {}", e, consecutive_errors);
                         
                         if consecutive_errors < 3 {
-                            // 使用上一帧的数据进行平滑过渡
                             let len = data.len().min(last_good_frame.len());
                             for i in 0..len {
-                                data[i] = last_good_frame[i] * (1.0 - (consecutive_errors as f32 * 0.3));
+                                data[i] = last_good_frame[i] * (1.0 - (consecutive_errors as f32 * 0.2));
                             }
-                            // 如果还有剩余的输出缓冲区，填充静音
                             if len < data.len() {
                                 data[len..].fill(0.0);
                             }
                         } else {
-                            // 太多连续错误，使用静音
                             data.fill(0.0);
                         }
                     }
                 }
             } else {
-                // 没有更多数据时，渐变至静音
                 let len = data.len().min(last_good_frame.len());
                 for i in 0..len {
-                    data[i] = last_good_frame[i] * 0.5;
+                    data[i] = last_good_frame[i] * 0.8;
                 }
-                // 如果还有剩余的输出缓冲区，填充静音
                 if len < data.len() {
                     data[len..].fill(0.0);
                 }
-                // 更新last_good_frame
                 for x in last_good_frame.iter_mut() {
-                    *x *= 0.5;
+                    *x *= 0.8;
                 }
             }
         },
