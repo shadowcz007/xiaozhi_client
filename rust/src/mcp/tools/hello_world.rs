@@ -27,7 +27,7 @@ pub async fn handle(arguments: Option<HashMap<String, Value>>) -> Result<ToolsCa
         .and_then(|v| v.as_str())
         .unwrap_or("World");
 
-    let greeting = format!("Hello, {}! 这是来自ESP32设备的问候！🎉", name);
+    let greeting = format!("Hello, {}! 这是来自设备的问候！🎉", name);
     tracing::info!("👋 Hello World工具调用: {}", greeting);
 
     Ok(ToolsCallResult {
