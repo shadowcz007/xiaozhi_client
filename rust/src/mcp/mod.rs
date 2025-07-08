@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::types::Result;
 use self::types::*;
+use self::tools::{initialize_tools, handle_tools_call};
 
 /// MCP协议处理器
 pub struct MCPProtocol {
@@ -53,7 +54,7 @@ impl MCPProtocol {
                 self.handle_tools_list(id, params).await
             }
             MCPMessage::ToolsCall { id, params } => {
-                tools::handle_tools_call(id, params, &self.client_ref).await
+                handle_tools_call(id, params, &self.client_ref).await
             }
             MCPMessage::ResourcesList { id, params } => {
                 resources::handle_resources_list(id, params, &self.resources).await
@@ -83,7 +84,7 @@ impl MCPProtocol {
         }
 
         // 初始化工具列表
-        self.tools = tools::initialize_tools();
+        self.tools = initialize_tools();
         
         // 初始化资源列表
         // self.resources = resources::initialize_resources();
