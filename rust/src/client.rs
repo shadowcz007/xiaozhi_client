@@ -7,7 +7,7 @@ use crate::types::{DeviceState, ListeningMode, Result};
 use crate::config::Config;
 use crate::websocket::{WebSocketProtocol, WebSocketEvent};
 use crate::voice::{MicrophoneOpusRecorder, NodeAudioPlayer};
-use crate::mcp::{MCPProtocol, MCPMessage};
+use crate::mcp::{MCPProtocol, types::MCPMessage};
 
 /// 客户端状态变化回调类型
 pub type StateChangeCallback = Arc<dyn Fn(DeviceState) + Send + Sync>;
@@ -549,13 +549,13 @@ impl Client {
     }
 
     /// 获取MCP工具列表
-    pub async fn get_mcp_tools(&self) -> Result<Vec<crate::mcp::Tool>> {
+    pub async fn get_mcp_tools(&self) -> Result<Vec<crate::mcp::types::Tool>> {
         let mcp_protocol = self.mcp_protocol.lock().await;
         Ok(mcp_protocol.get_tools().to_vec())
     }
 
     /// 获取MCP资源列表
-    pub async fn get_mcp_resources(&self) -> Result<Vec<crate::mcp::Resource>> {
+    pub async fn get_mcp_resources(&self) -> Result<Vec<crate::mcp::types::Resource>> {
         let mcp_protocol = self.mcp_protocol.lock().await;
         Ok(mcp_protocol.get_resources().to_vec())
     }

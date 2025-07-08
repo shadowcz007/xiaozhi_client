@@ -15,7 +15,7 @@ pub use voice::{MicrophoneOpusRecorder, NodeAudioPlayer};
 pub use client::Client;
 pub use config::Config;
 pub use stdio_controller::StdioController;
-pub use mcp::{MCPProtocol, MCPMessage, Tool, Resource, Content};
+pub use mcp::{MCPProtocol, types::MCPMessage, types::Tool, types::Resource, types::Content};
 
 use tracing_subscriber::{fmt, EnvFilter};
 use std::sync::Arc;
