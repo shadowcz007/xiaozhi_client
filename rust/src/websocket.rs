@@ -243,10 +243,14 @@ impl WebSocketProtocol {
     }
 
     /// 创建Hello消息
+    // 开启功能：mcp
     fn create_hello_message(&self) -> serde_json::Value {
         serde_json::json!({
             "type": "hello",
             "version": 1,
+            "features": {
+                "mcp": true
+            },
             "transport": "websocket",
             "audio_params": {
                 "format": "opus",

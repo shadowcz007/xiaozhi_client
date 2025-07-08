@@ -5,10 +5,15 @@ edition = "2021"
 description = "Rust implementation of XiaoZhi voice assistant client"
 authors = ["shadow"]
 license = "MIT"
+default-run = "xiaozhi_client"
 
 [[bin]]
 name = "xiaozhi_client"
 path = "src/main.rs"
+
+[[bin]]
+name = "license_generator"
+path = "tools/license_generator.rs"
 
 [[example]]
 name = "simple_chat"
@@ -36,6 +41,13 @@ serde_json = "1.0"
 
 # UUID 和加密
 uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# 加密库
+aes-gcm = "0.10.1"
+base64 = "0.21.0"
+
+# 命令行参数解析
+clap = { version = "4.0", features = ["derive"] }
 
 # 错误处理
 thiserror = "1.0"

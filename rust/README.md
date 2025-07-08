@@ -2,6 +2,43 @@
 
 🤖 这是小智语音助手的 Rust 实现版本，提供完整的语音对话功能，包括实时音频录制、WebSocket 通信、Opus 音频编解码和智能对话管理。
 
+
+# 小智客户端命令行使用说明
+
+## 命令行使用方法
+
+### 生成许可证
+```bash
+# 生成许可证密钥
+./target/release/license_generator test-license test-password
+```
+
+### 运行客户端
+```bash
+# 基本运行命令
+./target/release/xiaozhi_client --key <许可证密钥>
+
+# 完整命令示例
+./target/release/xiaozhi_client \
+  --key <许可证密钥> \
+  --device-id <设备ID> \
+  --device-name <设备名称>
+
+# 开发环境测试示例
+./target/release/xiaozhi_client \
+  --key eyJsaWNlbnNlIjoidGVzdC1saWNlbnNlIiwicGFzc3dvcmQiOiJ0ZXN0LXBhc3N3b3JkIn0=
+```
+
+### 交互命令
+程序运行后可用的命令：
+```bash
+start   # 开始语音对话
+stop    # 停止语音对话
+quit    # 退出程序
+exit    # 退出程序
+``` 
+
+
 ## ✨ 功能特性
 
 - 🎙️ **实时语音录制** - 使用 CPAL 进行跨平台音频采集
