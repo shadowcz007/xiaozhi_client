@@ -19,6 +19,10 @@ path = "tools/license_generator.rs"
 name = "simple_chat"
 path = "examples/simple_chat.rs"
 
+[[example]]
+name = "mic_test"
+path = "examples/mic_test.rs"
+
 [dependencies]
 # WebSocket 通信
 tokio-tungstenite = { version = "0.20", features = ["native-tls"] }

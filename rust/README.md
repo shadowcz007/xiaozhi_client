@@ -10,7 +10,7 @@
 ### 生成许可证
 ```bash
 # 生成许可证密钥
-./target/release/license_generator test-license test-password
+./target/release/license_generator joy-client-mixlab-by-shadow shadow-mixlab-password123
 ```
 
 ### 运行客户端
