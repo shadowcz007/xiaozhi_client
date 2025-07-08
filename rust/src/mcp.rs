@@ -22,7 +22,7 @@ pub enum MCPMessage {
     },
     #[serde(rename = "initialized")]
     Initialized {
-        id: String,
+        id: Value,
     },
     #[serde(rename = "notifications/initialized")]
     NotificationsInitialized {
@@ -30,22 +30,22 @@ pub enum MCPMessage {
     },
     #[serde(rename = "tools/list")]
     ToolsList {
-        id: String,
+        id: Value,
         params: Option<ToolsListParams>,
     },
     #[serde(rename = "tools/call")]
     ToolsCall {
-        id: String,
+        id: Value,
         params: ToolsCallParams,
     },
     #[serde(rename = "resources/list")]
     ResourcesList {
-        id: String,
+        id: Value,
         params: Option<ResourcesListParams>,
     },
     #[serde(rename = "resources/read")]
     ResourcesRead {
-        id: String,
+        id: Value,
         params: ResourcesReadParams,
     },
     #[serde(rename = "notifications/progress")]
@@ -362,7 +362,7 @@ impl MCPProtocol {
     }
 
     /// 处理初始化完成消息
-    async fn handle_initialized(&mut self, id: String) -> Result<Option<serde_json::Value>> {
+    async fn handle_initialized(&mut self, id: Value) -> Result<Option<serde_json::Value>> {
         self.initialized = true;
         tracing::info!("✅ MCP协议握手完成！客户端已确认初始化");
         tracing::info!("📋 服务器已准备就绪，注册工具数量: {}", self.tools.len());
@@ -380,7 +380,7 @@ impl MCPProtocol {
     }
 
     /// 处理工具列表请求
-    async fn handle_tools_list(&self, id: String, _params: Option<ToolsListParams>) -> Result<Option<serde_json::Value>> {
+    async fn handle_tools_list(&self, id: Value, _params: Option<ToolsListParams>) -> Result<Option<serde_json::Value>> {
         tracing::info!("📋 收到工具列表请求, id: {}", id);
         tracing::debug!("📋 当前可用工具: {:?}", self.tools);
         
@@ -401,7 +401,7 @@ impl MCPProtocol {
     }
 
     /// 处理工具调用请求
-    async fn handle_tools_call(&self, id: String, params: ToolsCallParams) -> Result<Option<serde_json::Value>> {
+    async fn handle_tools_call(&self, id: Value, params: ToolsCallParams) -> Result<Option<serde_json::Value>> {
         tracing::info!("🔧 MCP工具调用: {}", params.name);
 
         let result = match params.name.as_str() {
@@ -441,7 +441,7 @@ impl MCPProtocol {
     }
 
     /// 处理资源列表请求
-    async fn handle_resources_list(&self, id: String, _params: Option<ResourcesListParams>) -> Result<Option<serde_json::Value>> {
+    async fn handle_resources_list(&self, id: Value, _params: Option<ResourcesListParams>) -> Result<Option<serde_json::Value>> {
         let result = ResourcesListResult {
             resources: self.resources.clone(),
             next_cursor: None,
@@ -458,7 +458,7 @@ impl MCPProtocol {
     }
 
     /// 处理资源读取请求
-    async fn handle_resources_read(&self, id: String, params: ResourcesReadParams) -> Result<Option<serde_json::Value>> {
+    async fn handle_resources_read(&self, id: Value, params: ResourcesReadParams) -> Result<Option<serde_json::Value>> {
         tracing::info!("📄 MCP资源读取: {}", params.uri);
 
         let contents = match params.uri.as_str() {
