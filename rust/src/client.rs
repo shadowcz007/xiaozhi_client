@@ -7,6 +7,7 @@ use crate::types::{DeviceState, ListeningMode, Result};
 use crate::config::Config;
 use crate::websocket::{WebSocketProtocol, WebSocketEvent};
 use crate::voice::{MicrophoneOpusRecorder, NodeAudioPlayer};
+use crate::mcp::{MCPProtocol, MCPMessage};
 
 /// 客户端状态变化回调类型
 pub type StateChangeCallback = Arc<dyn Fn(DeviceState) + Send + Sync>;
@@ -21,6 +22,7 @@ pub struct Client {
     keep_listening: Arc<AtomicBool>,
     aborted: Arc<AtomicBool>,
     is_recording_from_mic: Arc<AtomicBool>,
+    mcp_protocol: Arc<Mutex<MCPProtocol>>,
     
     // 回调函数
     pub on_state_changed: Option<StateChangeCallback>,
@@ -43,7 +45,7 @@ impl Client {
             tracing::debug!("🔇 音频播放完成回调被触发");
         });
 
-        Ok(Self {
+        let client = Self {
             config: config.clone(),
             protocol: Arc::new(Mutex::new(protocol)),
             recorder: Arc::new(Mutex::new(None)),
@@ -52,8 +54,19 @@ impl Client {
             keep_listening: Arc::new(AtomicBool::new(true)),
             aborted: Arc::new(AtomicBool::new(false)),
             is_recording_from_mic: Arc::new(AtomicBool::new(false)),
+            mcp_protocol: Arc::new(Mutex::new(MCPProtocol::new())),
             on_state_changed: None,
-        })
+        };
+
+        Ok(client)
+    }
+
+    /// 设置MCP协议的Client引用
+    pub async fn setup_mcp_client_ref(self: Arc<Self>) -> Result<()> {
+        let mut mcp_protocol = self.mcp_protocol.lock().await;
+        mcp_protocol.set_client_ref(Arc::downgrade(&self));
+        tracing::info!("✅ MCP协议已与Client实例集成");
+        Ok(())
     }
 
     /// 从配置参数创建客户端
@@ -214,6 +227,12 @@ impl Client {
             Some("error") => {
                 if let Some(message) = json_data.get("message").and_then(|v| v.as_str()) {
                     tracing::warn!("⚠️ 服务器错误: {}", message);
+                }
+            }
+            Some("mcp") => {
+                // 处理MCP协议消息
+                if let Err(e) = Self::handle_mcp_message(json_data, client).await {
+                    tracing::error!("❌ MCP消息处理失败: {}", e);
                 }
             }
             Some(other_type) => {
@@ -406,6 +425,145 @@ impl Client {
             // 调试输出完整数据以便检查
             println!("🔍 LLM完整数据: {}", serde_json::to_string_pretty(&data).unwrap_or_default());
         }
+    }
+
+    /// 处理MCP协议消息
+    async fn handle_mcp_message(data: serde_json::Value, client: &Arc<Client>) -> Result<()> {
+        tracing::info!("🔧 处理MCP消息: {:?}", data);
+
+        // 从 payload 中提取实际的 MCP 消息
+        let mcp_data = if let Some(payload) = data.get("payload") {
+            tracing::debug!("📦 从 payload 中提取 MCP 消息: {:?}", payload);
+            payload.clone()
+        } else {
+            tracing::debug!("📦 未找到 payload 字段，使用原始消息");
+            data.clone()
+        };
+
+        // 尝试解析MCP消息
+        match serde_json::from_value::<MCPMessage>(mcp_data.clone()) {
+            Ok(mcp_message) => {
+                tracing::info!("📥 成功解析MCP消息: {:?}", mcp_message);
+                let mut mcp_protocol = client.mcp_protocol.lock().await;
+                
+                // 处理MCP消息并获取响应
+                match mcp_protocol.handle_message(mcp_message).await {
+                    Ok(Some(response)) => {
+                        // 提取原始请求中的 session_id，并将其包含在响应中
+                        let session_id = data.get("session_id").cloned();
+                        
+                        // 将MCP响应包装在统一的 "信封" 结构中
+                        let wrapped_response = serde_json::json!({
+                            "type": "mcp",
+                            "session_id": session_id,
+                            "payload": response
+                        });
+
+                        let response_text = serde_json::to_string(&wrapped_response)?;
+                        tracing::debug!("📤 准备发送包装后的MCP响应: {}", response_text);
+                        let mut protocol_guard = client.protocol.lock().await;
+                        protocol_guard.send_text(&response_text).await?;
+                        tracing::info!("📤 MCP响应已发送成功");
+                    }
+                    Ok(None) => {
+                        tracing::debug!("⚪ MCP消息处理完成，无需响应");
+                    }
+                    Err(e) => {
+                        tracing::error!("❌ MCP消息处理失败: {}", e);
+                        return Err(e);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("❌ MCP消息解析失败: {}，消息内容: {:?}", e, mcp_data);
+                // 如果不是标准MCP消息，可能是MCP相关的自定义消息
+                tracing::debug!("📄 尝试自定义处理");
+                Self::handle_custom_mcp_message(data, client).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 处理自定义MCP消息
+    async fn handle_custom_mcp_message(data: serde_json::Value, client: &Arc<Client>) -> Result<()> {
+        // 检查是否是MCP工具调用的响应或通知
+        if let Some(method) = data.get("method").and_then(|v| v.as_str()) {
+            match method {
+                "mcp/tool_result" => {
+                    if let Some(result) = data.get("result") {
+                        tracing::info!("🔧 MCP工具执行结果: {:?}", result);
+                        println!("🔧 MCP工具执行结果: {}", serde_json::to_string_pretty(result).unwrap_or_default());
+                    }
+                }
+                "mcp/notification" => {
+                    if let Some(message) = data.get("message").and_then(|v| v.as_str()) {
+                        tracing::info!("📢 MCP通知: {}", message);
+                        println!("📢 MCP通知: {}", message);
+                    }
+                }
+                _ => {
+                    tracing::debug!("🔍 未知MCP方法: {}", method);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 发送MCP工具调用请求
+    pub async fn call_mcp_tool(&self, tool_name: &str, arguments: Option<std::collections::HashMap<String, serde_json::Value>>) -> Result<serde_json::Value> {
+        tracing::info!("🔧 调用MCP工具: {}", tool_name);
+
+        let session_id = {
+            let protocol_guard = self.protocol.lock().await;
+            protocol_guard.get_session_id().await.unwrap_or_default()
+        };
+
+        // 构造MCP工具调用消息
+        let tool_call = serde_json::json!({
+            "type": "mcp",
+            "session_id": session_id,
+            "method": "tools/call",
+            "id": format!("tool_call_{}", chrono::Utc::now().timestamp_millis()),
+            "params": {
+                "name": tool_name,
+                "arguments": arguments
+            }
+        });
+
+        // 发送工具调用消息
+        {
+            let mut protocol_guard = self.protocol.lock().await;
+            let message_text = serde_json::to_string(&tool_call)?;
+            protocol_guard.send_text(&message_text).await?;
+            tracing::debug!("📤 MCP工具调用已发送: {}", message_text);
+        }
+
+        // 这里应该等待响应，为了简化，暂时返回调用确认
+        Ok(serde_json::json!({
+            "status": "sent",
+            "tool": tool_name,
+            "timestamp": chrono::Utc::now().timestamp()
+        }))
+    }
+
+    /// 获取MCP工具列表
+    pub async fn get_mcp_tools(&self) -> Result<Vec<crate::mcp::Tool>> {
+        let mcp_protocol = self.mcp_protocol.lock().await;
+        Ok(mcp_protocol.get_tools().to_vec())
+    }
+
+    /// 获取MCP资源列表
+    pub async fn get_mcp_resources(&self) -> Result<Vec<crate::mcp::Resource>> {
+        let mcp_protocol = self.mcp_protocol.lock().await;
+        Ok(mcp_protocol.get_resources().to_vec())
+    }
+
+    /// 检查MCP是否已初始化
+    pub async fn is_mcp_initialized(&self) -> bool {
+        let mcp_protocol = self.mcp_protocol.lock().await;
+        mcp_protocol.is_initialized()
     }
 
     /// 设置设备状态
@@ -750,6 +908,7 @@ impl Clone for Client {
             keep_listening: Arc::clone(&self.keep_listening),
             aborted: Arc::clone(&self.aborted),
             is_recording_from_mic: Arc::clone(&self.is_recording_from_mic),
+            mcp_protocol: Arc::clone(&self.mcp_protocol),
             on_state_changed: self.on_state_changed.clone(),
         }
     }
