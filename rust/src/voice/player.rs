@@ -471,22 +471,32 @@ impl NodeAudioPlayer {
 
     /// 停止播放
     pub fn stop(&mut self) {
-        if self.is_playing.load(Ordering::Relaxed) {
-            self.is_playing.store(false, Ordering::Relaxed);
-            self._stream = None;
-            
-            // 清空缓冲区
-            if let Ok(mut buffer_guard) = self.audio_buffer.lock() {
-                buffer_guard.clear();
-            }
+        // 🔧 移除了错误的 `if is_playing` 判断。
+        // 无论当前状态如何，调用 stop() 都必须彻底清理资源。
+        self.is_playing.store(false, Ordering::Relaxed);
 
-            // 调用完成回调
-            if let Some(callback) = &self.playback_finished_callback {
-                callback();
+        // 使用 take() 来消耗并丢弃音频流，确保回调停止
+        if let Some(stream) = self._stream.take() {
+            if let Err(e) = stream.pause() {
+                tracing::warn!("暂停音频流失败: {}", e);
             }
-            
-            tracing::info!("🛑 音频播放已停止");
+            tracing::info!("🔊 音频流已暂停和释放");
         }
+
+        // 清空缓冲区
+        if let Ok(mut buffer_guard) = self.audio_buffer.lock() {
+            buffer_guard.clear();
+        }
+
+        // 重置停止接收标志，为下次播放做准备
+        self.stop_receiving.store(false, Ordering::Relaxed);
+
+        // 调用完成回调
+        if let Some(callback) = &self.playback_finished_callback {
+            callback();
+        }
+
+        tracing::info!("🛑 音频播放已完全停止");
     }
 
     /// 检查是否正在播放

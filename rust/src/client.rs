@@ -341,8 +341,10 @@ impl Client {
         client: &Arc<Client>,
     ) {
         // 开始优雅停止播放器
-        let mut player_guard = player.lock().await;
-        player_guard.start_graceful_stop();
+        {
+            let mut player_guard = player.lock().await;
+            player_guard.start_graceful_stop();
+        }
 
         // 等待音频播放完成
         Self::wait_for_audio_playback_complete(player).await;
@@ -386,14 +388,23 @@ impl Client {
         let max_wait_time = Duration::from_secs(10); // 减少超时时间
         let start_time = std::time::Instant::now();
 
+        tracing::info!("🔍 开始等待音频播放完成");
+
         loop {
             let is_playing_now = {
                 let player_guard = player.lock().await;
-                player_guard.is_playing()
+                let playing = player_guard.is_playing();
+                tracing::debug!("🔍 播放状态检查: is_playing={}", playing);
+                playing
             };
 
             // 只检查播放状态，不检查缓冲区
             if !is_playing_now {
+                // 🔧 播放完成后，确保真正停止音频流
+                tracing::info!("🔍 检测到播放已停止，确保音频流真正停止");
+                let mut player_guard = player.lock().await;
+                player_guard.stop();
+                tracing::info!("🛑 音频流已确认停止");
                 break;
             }
 
@@ -407,7 +418,7 @@ impl Client {
             tokio::time::sleep(check_interval).await;
         }
 
-        tracing::debug!("🔇 音频播放完成检查结束");
+        tracing::info!("🔇 音频播放完成检查结束");
     }
 
     /// 处理STT消息
