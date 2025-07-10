@@ -6,14 +6,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 use tokio::time;
+use rubato::{Resampler, SincFixedIn, InterpolationType, InterpolationParameters, WindowFunction};
 use crate::types::{Result, ClientError};
 
 /// 音频播放器
 pub struct NodeAudioPlayer {
     decoder: Arc<Mutex<Decoder>>,
-    audio_buffer: Arc<Mutex<VecDeque<Vec<i16>>>>,
+    audio_buffer: Arc<Mutex<VecDeque<Vec<f32>>>>, // 改为f32类型
     _stream: Option<Stream>,
     is_playing: Arc<AtomicBool>,
+    stop_receiving: Arc<AtomicBool>, // 新增：停止接收新数据标志
     sample_rate: u32,
     channels: u16,
     frame_size: usize,
@@ -21,6 +23,10 @@ pub struct NodeAudioPlayer {
     max_buffer_size: usize,
     last_data_time: Arc<Mutex<Instant>>,
     playback_finished_callback: Option<Box<dyn Fn() + Send + Sync>>,
+    debug_counter: Arc<Mutex<usize>>,
+    device_channels: u16,
+    device_sample_rate: u32,
+    resampler: Arc<Mutex<Option<SincFixedIn<f32>>>>,
 }
 
 unsafe impl Send for NodeAudioPlayer {}
@@ -42,11 +48,14 @@ impl NodeAudioPlayer {
         let decoder = Decoder::new(sample_rate, opus_channels)?;
         let frame_size = (sample_rate as f64 * 0.02) as usize; // 20ms frames
 
+        tracing::info!("🔊 创建新的音频播放器: 采样率={}Hz, 声道={}, 帧大小={}", sample_rate, channels, frame_size);
+
         Ok(Self {
             decoder: Arc::new(Mutex::new(decoder)),
             audio_buffer: Arc::new(Mutex::new(VecDeque::new())),
             _stream: None,
             is_playing: Arc::new(AtomicBool::new(false)),
+            stop_receiving: Arc::new(AtomicBool::new(false)), // 初始化新标志
             sample_rate,
             channels,
             frame_size,
@@ -54,14 +63,44 @@ impl NodeAudioPlayer {
             max_buffer_size: 100,   // 最大缓冲区限制
             last_data_time: Arc::new(Mutex::new(Instant::now())),
             playback_finished_callback: None,
+            debug_counter: Arc::new(Mutex::new(0)),
+            device_channels: 2, // 默认值，会在配置时更新
+            device_sample_rate: 48000, // 默认值，会在配置时更新
+            resampler: Arc::new(Mutex::new(None)),
         })
     }
 
     /// 获取默认输出设备
     pub fn get_default_output_device() -> Result<Device> {
         let host = cpal::default_host();
-        host.default_output_device()
-            .ok_or_else(|| ClientError::AudioError("未找到默认输出设备".to_string()))
+        let device = host.default_output_device()
+            .ok_or_else(|| ClientError::AudioError("未找到默认输出设备".to_string()))?;
+
+        // 打印设备信息
+        tracing::info!("🔊 默认输出设备名称: {:?}", device.name());
+        
+        // 打印支持的配置
+        if let Ok(supported_configs) = device.supported_output_configs() {
+            tracing::info!("🔊 设备支持的配置:");
+            for config in supported_configs {
+                tracing::info!("  - 采样率范围: {}Hz - {}Hz", 
+                    config.min_sample_rate().0,
+                    config.max_sample_rate().0
+                );
+                tracing::info!("  - 声道数: {}", config.channels());
+                tracing::info!("  - 采样格式: {:?}", config.sample_format());
+            }
+        }
+
+        // 打印默认配置
+        if let Ok(default_config) = device.default_output_config() {
+            tracing::info!("🔊 设备默认配置:");
+            tracing::info!("  - 采样率: {}Hz", default_config.sample_rate().0);
+            tracing::info!("  - 声道数: {}", default_config.channels());
+            tracing::info!("  - 采样格式: {:?}", default_config.sample_format());
+        }
+
+        Ok(device)
     }
 
     /// 设置播放完成回调
@@ -74,10 +113,18 @@ impl NodeAudioPlayer {
 
     /// 处理音频数据
     pub fn process_audio_data(&mut self, opus_data: Vec<u8>) -> Result<()> {
+        // 如果设置了停止接收标志，直接返回
+        if self.stop_receiving.load(Ordering::Relaxed) {
+            tracing::debug!("🔊 已停止接收新音频数据");
+            return Ok(());
+        }
+
         if opus_data.is_empty() {
             tracing::warn!("🔊 收到空的Opus数据");
             return Ok(());
         }
+
+        tracing::debug!("🔊 接收到Opus数据: 长度={}", opus_data.len());
 
         // 解码Opus数据
         let pcm_data = {
@@ -87,13 +134,12 @@ impl NodeAudioPlayer {
 
             let mut output_buffer = vec![0i16; self.frame_size];
             
-            // 尝试解码，如果失败则生成静音
             match decoder_guard.decode(&opus_data, &mut output_buffer, false) {
                 Ok(len) => {
                     output_buffer.truncate(len);
+                    tracing::debug!("🔊 Opus解码成功: PCM长度={}", len);
                     if len == 0 {
                         tracing::warn!("🔊 解码返回0长度，生成静音帧");
-                        // 生成静音帧保持连续性
                         vec![0i16; self.frame_size]
                     } else {
                         output_buffer
@@ -101,11 +147,64 @@ impl NodeAudioPlayer {
                 }
                 Err(e) => {
                     tracing::error!("🔊 Opus解码失败: {}, 生成静音帧", e);
-                    // 解码失败时生成静音帧，避免音频中断
                     vec![0i16; self.frame_size]
                 }
             }
         };
+
+        // 将i16转换为f32
+        let pcm_f32: Vec<f32> = pcm_data.iter()
+            .map(|&x| x as f32 / 32768.0)
+            .collect();
+
+        // 重采样处理
+        let resampled_data = {
+            let mut resampler_guard = self.resampler.lock().map_err(|_| {
+                ClientError::AudioError("获取重采样器锁失败".to_string())
+            })?;
+
+            // 如果重采样器还没有初始化，创建一个新的
+            if resampler_guard.is_none() {
+                let params = InterpolationParameters {
+                    sinc_len: 256,
+                    f_cutoff: 0.95,
+                    interpolation: InterpolationType::Linear,
+                    oversampling_factor: 256,
+                    window: WindowFunction::BlackmanHarris2,
+                };
+                *resampler_guard = Some(SincFixedIn::<f32>::new(
+                    self.device_sample_rate as f64 / self.sample_rate as f64,
+                    2.0,
+                    params,
+                    self.frame_size,
+                    1, // 单声道处理
+                ).map_err(|e| ClientError::AudioError(format!("创建重采样器失败: {}", e)))?);
+            }
+
+            let resampler = resampler_guard.as_mut().unwrap();
+            let waves_in = vec![pcm_f32.clone()];
+            let waves_out = resampler.process(&waves_in, None).map_err(|e| {
+                ClientError::AudioError(format!("重采样处理失败: {}", e))
+            })?;
+
+            waves_out.into_iter().next().unwrap_or_default()
+        };
+
+        tracing::debug!(
+            "🔊 重采样: 输入长度={}, 输出长度={}, 比率={:.2}",
+            pcm_f32.len(),
+            resampled_data.len(),
+            self.device_sample_rate as f32 / self.sample_rate as f32
+        );
+
+        // 声道转换（单声道到多声道）
+        let mut multi_channel_data = Vec::with_capacity(resampled_data.len() * self.device_channels as usize);
+        for sample in resampled_data.iter() {
+            // 复制同一个样本到所有声道
+            for _ in 0..self.device_channels {
+                multi_channel_data.push(*sample);
+            }
+        }
 
         // 添加到缓冲区
         {
@@ -113,17 +212,20 @@ impl NodeAudioPlayer {
                 ClientError::AudioError("获取音频缓冲区锁失败".to_string())
             })?;
 
+            let buffer_len = buffer_guard.len();
+            tracing::debug!("🔊 当前缓冲区状态: 已使用={}/{}", buffer_len, self.max_buffer_size);
+
             // 检查缓冲区是否过满
-            if buffer_guard.len() >= self.max_buffer_size {
+            if buffer_len >= self.max_buffer_size {
                 tracing::warn!("🔊 音频缓冲区过满，丢弃旧数据");
                 // 丢弃一些旧数据，但不要一次丢弃太多
-                let drop_count = std::cmp::min(5, buffer_guard.len() - self.max_buffer_size + 1);
+                let drop_count = std::cmp::min(5, buffer_len - self.max_buffer_size + 1);
                 for _ in 0..drop_count {
                     buffer_guard.pop_front();
                 }
             }
 
-            buffer_guard.push_back(pcm_data);
+            buffer_guard.push_back(multi_channel_data);
         }
 
         // 更新最后接收数据时间
@@ -188,31 +290,31 @@ impl NodeAudioPlayer {
 
     /// 获取最佳配置
     fn get_optimal_config(&self, device: &Device) -> Result<StreamConfig> {
-        let supported_configs = device.supported_output_configs()
-            .map_err(|e| ClientError::AudioError(format!("获取支持的配置失败: {}", e)))?;
-
-        // 尝试找到匹配的配置
-        for supported_config in supported_configs {
-            let sample_rate_range = supported_config.min_sample_rate().0..=supported_config.max_sample_rate().0;
-            if sample_rate_range.contains(&self.sample_rate) {
-                let config = StreamConfig {
-                    channels: self.channels,
-                    sample_rate: SampleRate(self.sample_rate),
-                    buffer_size: cpal::BufferSize::Fixed(self.frame_size as u32),
-                };
-                return Ok(config);
-            }
+        let default_config = device.default_output_config()
+            .map_err(|e| ClientError::AudioError(format!("获取默认配置失败: {}", e)))?;
+        
+        // 更新设备配置
+        if let Some(self_mut) = unsafe { (self as *const Self as *mut Self).as_mut() } {
+            self_mut.device_channels = default_config.channels();
+            self_mut.device_sample_rate = default_config.sample_rate().0;
         }
 
-        // 使用默认配置
-        let _default_config = device.default_output_config()
-            .map_err(|e| ClientError::AudioError(format!("获取默认配置失败: {}", e)))?;
+        tracing::info!("🔊 使用设备配置:");
+        tracing::info!("  - 采样率: {}Hz", default_config.sample_rate().0);
+        tracing::info!("  - 声道数: {}", default_config.channels());
+        tracing::info!("  - 采样格式: {:?}", default_config.sample_format());
 
         Ok(StreamConfig {
-            channels: self.channels,
-            sample_rate: SampleRate(self.sample_rate),
+            channels: default_config.channels(),
+            sample_rate: default_config.sample_rate(),
             buffer_size: cpal::BufferSize::Fixed(self.frame_size as u32),
         })
+    }
+
+    /// 开始优雅停止
+    pub fn start_graceful_stop(&mut self) {
+        tracing::info!("🔊 开始优雅停止播放器：停止接收新数据，等待缓冲区播放完毕");
+        self.stop_receiving.store(true, Ordering::Relaxed);
     }
 
     /// 创建音频流
@@ -220,22 +322,32 @@ impl NodeAudioPlayer {
         &self,
         device: &Device,
         config: &StreamConfig,
-        audio_buffer: Arc<Mutex<VecDeque<Vec<i16>>>>,
+        audio_buffer: Arc<Mutex<VecDeque<Vec<f32>>>>,
         is_playing: Arc<AtomicBool>,
         last_data_time: Arc<Mutex<Instant>>,
     ) -> Result<Stream>
     where
         T: cpal::Sample + cpal::SizedSample,
-        T: cpal::FromSample<i16>,
+        T: cpal::FromSample<f32>,
     {
+        let debug_counter = Arc::clone(&self.debug_counter);
+        let stop_receiving = Arc::clone(&self.stop_receiving);
+        
         let stream = device
             .build_output_stream(
                 config,
                 move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+                    let mut counter = debug_counter.lock().unwrap();
+                    *counter += 1;
+                    
+                    if *counter % 100 == 0 {
+                        tracing::debug!("🔊 音频回调 #{}: 请求数据长度={}", counter, data.len());
+                    }
+
                     if !is_playing.load(Ordering::Relaxed) {
-                        // 如果没有播放，填充静音
+                        tracing::debug!("🔊 播放器未激活，输出静音");
                         for sample in data.iter_mut() {
-                            *sample = cpal::Sample::from_sample(0i16);
+                            *sample = cpal::Sample::from_sample(0.0f32);
                         }
                         return;
                     }
@@ -243,52 +355,67 @@ impl NodeAudioPlayer {
                     let mut buffer_guard = match audio_buffer.lock() {
                         Ok(guard) => guard,
                         Err(_) => {
-                            // 锁失败，填充静音
+                            tracing::error!("🔊 获取音频缓冲区锁失败");
                             for sample in data.iter_mut() {
-                                *sample = cpal::Sample::from_sample(0i16);
+                                *sample = cpal::Sample::from_sample(0.0f32);
                             }
                             return;
                         }
                     };
 
+                    if *counter % 100 == 0 {
+                        tracing::debug!("🔊 缓冲区状态: 数据帧数={}", buffer_guard.len());
+                    }
+
                     let mut output_index = 0;
+                    let mut samples_copied = 0;
                     
-                    // 从缓冲区取出数据并播放
-                    while output_index < data.len() && !buffer_guard.is_empty() {
-                        if let Some(pcm_frame) = buffer_guard.front_mut() {
-                            let remaining_output = data.len() - output_index;
-                            let samples_to_copy = std::cmp::min(pcm_frame.len(), remaining_output);
-
-                            // 复制数据到输出缓冲区
-                            for i in 0..samples_to_copy {
-                                data[output_index + i] = cpal::Sample::from_sample(pcm_frame[i]);
-                            }
-
-                            output_index += samples_to_copy;
-
-                            if samples_to_copy == pcm_frame.len() {
-                                // 整个帧都被消费了，移除它
-                                buffer_guard.pop_front();
-                            } else {
-                                // 只消费了部分数据，从帧头部移除已消费的部分
-                                // 保留未消费的数据供下次使用
-                                pcm_frame.drain(0..samples_to_copy);
-                                break; // 输出缓冲区已满，保留剩余数据
-                            }
-                        } else {
+                    while output_index < data.len() {
+                        if buffer_guard.is_empty() {
                             break;
+                        }
+
+                        let frame = buffer_guard.front_mut().unwrap(); // safe due to check
+                        let remaining_output = data.len() - output_index;
+                        let samples_to_copy = std::cmp::min(frame.len(), remaining_output);
+
+                        for i in 0..samples_to_copy {
+                            data[output_index + i] = cpal::Sample::from_sample(frame[i]);
+                        }
+
+                        output_index += samples_to_copy;
+                        samples_copied += samples_to_copy;
+
+                        // Remove the copied part
+                        if samples_to_copy == frame.len() {
+                            // Frame fully consumed
+                            buffer_guard.pop_front();
+                        } else {
+                            // Frame partially consumed, remove the copied part from the front
+                            // This is not super efficient for a Vec, but it's correct.
+                            // A VecDeque for the frame itself would be better.
+                            frame.drain(0..samples_to_copy);
                         }
                     }
 
-                    // 如果还有剩余空间，填充静音
-                    for i in output_index..data.len() {
-                        data[i] = cpal::Sample::from_sample(0i16);
+                    if *counter % 100 == 0 {
+                        tracing::debug!("🔊 已复制采样点: {}/{}", samples_copied, data.len());
                     }
 
-                    // 如果缓冲区为空，检查是否应该停止播放
+                    // 填充剩余空间为静音
+                    for i in output_index..data.len() {
+                        data[i] = cpal::Sample::from_sample(0.0f32);
+                    }
+
                     if buffer_guard.is_empty() {
                         if let Ok(last_time_guard) = last_data_time.lock() {
-                            if last_time_guard.elapsed() > Duration::from_millis(500) {
+                            // 如果停止接收新数据，缓冲区为空时立即停止
+                            if stop_receiving.load(Ordering::Relaxed) {
+                                tracing::info!("🔊 缓冲区已清空，停止播放");
+                                is_playing.store(false, Ordering::Relaxed);
+                            } else if last_time_guard.elapsed() > Duration::from_millis(500) {
+                                // 原有逻辑：超时停止
+                                tracing::info!("🔊 缓冲区为空且超时，停止播放");
                                 is_playing.store(false, Ordering::Relaxed);
                             }
                         }

@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::types::{DeviceState, ListeningMode, Result};
+use crate::types::{DeviceState, ListeningMode, Result, ClientError};
 use crate::config::Config;
 use crate::websocket::{WebSocketProtocol, WebSocketEvent};
 use crate::voice::{MicrophoneOpusRecorder, NodeAudioPlayer};
@@ -340,6 +340,10 @@ impl Client {
         callback: &Option<StateChangeCallback>,
         client: &Arc<Client>,
     ) {
+        // 开始优雅停止播放器
+        let mut player_guard = player.lock().await;
+        player_guard.start_graceful_stop();
+
         // 等待音频播放完成
         Self::wait_for_audio_playback_complete(player).await;
 
@@ -379,25 +383,24 @@ impl Client {
     /// 等待音频播放完成
     async fn wait_for_audio_playback_complete(player: &Arc<Mutex<NodeAudioPlayer>>) {
         let check_interval = Duration::from_millis(50);
-        let max_wait_time = Duration::from_secs(30);
+        let max_wait_time = Duration::from_secs(10); // 减少超时时间
         let start_time = std::time::Instant::now();
 
-        // 给予播放器一个缓冲时间来开始播放，增加到200ms以应对初始延迟
-        tokio::time::sleep(Duration::from_millis(200)).await;
-
         loop {
-            let (is_playing_now, buffer_len) = {
+            let is_playing_now = {
                 let player_guard = player.lock().await;
-                (player_guard.is_playing(), player_guard.get_buffer_status().0)
+                player_guard.is_playing()
             };
 
-            // 当播放器报告未在播放且其缓冲区也为空时，我们才认为播放已真正结束
-            if !is_playing_now && buffer_len == 0 {
+            // 只检查播放状态，不检查缓冲区
+            if !is_playing_now {
                 break;
             }
 
             if start_time.elapsed() > max_wait_time {
-                tracing::warn!("等待音频播放完成超时 (is_playing: {}, buffer: {})", is_playing_now, buffer_len);
+                tracing::warn!("等待音频播放完成超时，强制停止");
+                let mut player_guard = player.lock().await;
+                player_guard.stop();
                 break;
             }
 
@@ -462,7 +465,7 @@ impl Client {
                         let response_text = serde_json::to_string(&wrapped_response)?;
                         tracing::debug!("📤 准备发送包装后的MCP响应: {}", response_text);
                         let mut protocol_guard = client.protocol.lock().await;
-                        protocol_guard.send_text(&response_text).await?;
+                        protocol_guard.send_text(&response_text).await.map_err(|e| ClientError::from(e.to_string()))?;
                         tracing::info!("📤 MCP响应已发送成功");
                     }
                     Ok(None) => {
@@ -470,7 +473,7 @@ impl Client {
                     }
                     Err(e) => {
                         tracing::error!("❌ MCP消息处理失败: {}", e);
-                        return Err(e);
+                        return Err(ClientError::from(e.to_string()));
                     }
                 }
             }
@@ -478,7 +481,7 @@ impl Client {
                 tracing::error!("❌ MCP消息解析失败: {}，消息内容: {:?}", e, mcp_data);
                 // 如果不是标准MCP消息，可能是MCP相关的自定义消息
                 tracing::debug!("📄 尝试自定义处理");
-                Self::handle_custom_mcp_message(data, client).await?;
+                Self::handle_custom_mcp_message(data, client).await.map_err(|e| ClientError::from(e.to_string()))?;
             }
         }
 
@@ -486,7 +489,7 @@ impl Client {
     }
 
     /// 处理自定义MCP消息
-    async fn handle_custom_mcp_message(data: serde_json::Value, client: &Arc<Client>) -> Result<()> {
+    async fn handle_custom_mcp_message(data: serde_json::Value, _client: &Arc<Client>) -> Result<()> {
         // 检查是否是MCP工具调用的响应或通知
         if let Some(method) = data.get("method").and_then(|v| v.as_str()) {
             match method {
@@ -753,6 +756,10 @@ impl Client {
             self.config.audio.channels,
             ((self.config.audio.frame_duration as usize) * (self.config.audio.input_sample_rate as usize)) / 1000,
         )?;
+
+        // 检查设备状态
+        let status = recorder.check_device_status()?;
+        println!("设备状态: {:?}", status);
 
         // 开始录音
         let opus_receiver = recorder.start_recording()?;
