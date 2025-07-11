@@ -23,6 +23,10 @@ path = "examples/simple_chat.rs"
 name = "mic_test"
 path = "examples/mic_test.rs"
 
+[[example]]
+name = "camera_vision"
+path = "examples/camera_vision_plugin.rs"
+
 [dependencies]
 # WebSocket 通信
 tokio-tungstenite = { version = "0.20", features = ["native-tls"] }
@@ -64,6 +68,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # 时间处理
 chrono = { version = "0.4", features = ["serde"] }
 rubato = "0.12.0"
+
+# 摄像头支持
+nokhwa = { version = "0.10", features = ["input-native"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
