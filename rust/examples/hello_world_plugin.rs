@@ -12,8 +12,8 @@ use xiaozhi_client::types::Result;
 /// 定义工具
 fn get_tool() -> Tool {
     Tool {
-        name: "hello_world".to_string(),
-        description: "这是一个来自插件的 Hello World 示例工具，返回问候消息".to_string(),
+        name: "hello_tool".to_string(),
+        description: "测试问候的工具，返回问候消息".to_string(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
