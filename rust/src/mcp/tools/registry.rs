@@ -74,5 +74,11 @@ pub async fn handle_tools_call(
         }
     };
 
-    Ok(Some(serde_json::to_value(result)?))
+    let response = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result
+    });
+
+    Ok(Some(response))
 } 
