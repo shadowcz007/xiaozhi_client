@@ -7,14 +7,14 @@ use serde_json::Value;
 
 use crate::types::Result;
 use self::types::*;
-use self::tools::{initialize_tools, handle_tools_call};
+use self::tools::registry::{initialize_tools, handle_tools_call, ToolSource};
 
 /// MCP协议处理器
 pub struct MCPProtocol {
     /// 是否已初始化
     initialized: bool,
     /// 可用工具列表
-    tools: Vec<Tool>,
+    tools: Vec<ToolSource>,
     /// 可用资源列表
     resources: Vec<Resource>,
     /// Client实例的弱引用，用于调用实际的设备功能
@@ -54,7 +54,7 @@ impl MCPProtocol {
                 self.handle_tools_list(id, params).await
             }
             MCPMessage::ToolsCall { id, params } => {
-                handle_tools_call(id, params, &self.client_ref).await
+                handle_tools_call(id, params, &self.tools, &self.client_ref).await
             }
             MCPMessage::ResourcesList { id, params } => {
                 resources::handle_resources_list(id, params, &self.resources).await
@@ -144,7 +144,7 @@ impl MCPProtocol {
         tracing::debug!("📋 当前可用工具: {:?}", self.tools);
         
         let result = ToolsListResult {
-            tools: self.tools.clone(),
+            tools: self.tools.iter().map(|ts| ts.get_tool().clone()).collect(),
             next_cursor: None,
         };
 
@@ -196,8 +196,8 @@ impl MCPProtocol {
     }
 
     /// 获取可用工具列表
-    pub fn get_tools(&self) -> &[Tool] {
-        &self.tools
+    pub fn get_tools(&self) -> Vec<Tool> {
+        self.tools.iter().map(|ts| ts.get_tool().clone()).collect()
     }
 
     /// 获取可用资源列表

@@ -204,6 +204,12 @@ pub enum ClientError {
 
     #[error("系统时间错误: {0}")]
     SystemTimeError(#[from] std::time::SystemTimeError),
+
+    #[error("内部错误: {0}")]
+    Internal(String),
+
+    #[error("IO错误: {0}")]
+    IoError(#[from] std::io::Error),
 }
 
 impl From<String> for ClientError {

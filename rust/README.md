@@ -169,6 +169,160 @@ rust/
 └── README.md                 # 项目文档
 ```
 
+## 🔌 插件系统
+
+小智客户端支持通过插件机制扩展 MCP (Multi-functional Collaborative Protocol) 工具。每个插件都是一个独立的可执行程序，通过标准输入输出（stdio）与主程序通信。
+
+### 插件开发指南
+
+1. **创建新插件**
+
+```rust
+use xiaozhi_client::mcp::types::{Content, Tool, ToolsCallResult};
+use xiaozhi_client::types::Result;
+
+/// 定义工具
+fn get_tool() -> Tool {
+    Tool {
+        name: "my_tool".to_string(),
+        description: "这是我的自定义工具".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "param1": {
+                    "type": "string",
+                    "description": "参数1的说明"
+                }
+            }
+        }),
+    }
+}
+
+/// 执行工具
+async fn handle(arguments: Option<HashMap<String, Value>>) -> Result<ToolsCallResult> {
+    // 处理输入参数
+    let param1 = arguments
+        .as_ref()
+        .and_then(|args| args.get("param1"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("默认值");
+
+    // 返回结果
+    Ok(ToolsCallResult {
+        content: vec![Content::Text {
+            text: format!("处理结果: {}", param1),
+        }],
+        is_error: None,
+    })
+}
+
+#[tokio::main]
+async fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() > 1 && args[1] == "--get-tool" {
+        // 返回工具定义
+        let tool_def = get_tool();
+        println!("{}", serde_json::to_string_pretty(&tool_def).unwrap());
+    } else {
+        // 执行工具逻辑
+        let mut buffer = String::new();
+        std::io::stdin().read_to_string(&mut buffer).unwrap();
+        
+        let arguments = if buffer.is_empty() {
+            None
+        } else {
+            Some(serde_json::from_str(&buffer).unwrap())
+        };
+
+        match handle(arguments).await {
+            Ok(result) => println!("{}", serde_json::to_string(&result).unwrap()),
+            Err(e) => {
+                eprintln!("错误: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+}
+```
+
+2. **编译插件**
+
+```bash
+# 编译插件（假设源文件为 examples/my_tool.rs）
+cargo build --example my_tool --release
+```
+
+3. **插件协议说明**
+
+- **工具定义**: 插件在收到 `--get-tool` 参数时，需要将 Tool 定义以 JSON 格式输出到 stdout
+- **执行调用**: 
+  - 输入: 通过 stdin 接收 JSON 格式的参数
+  - 输出: 将 ToolsCallResult 以 JSON 格式输出到 stdout
+  - 错误: 错误信息输出到 stderr，并以非零状态码退出
+
+### 插件部署和使用
+
+1. **部署插件**
+
+```bash
+# 1. 在主程序目录下创建 plugins 文件夹
+mkdir -p target/release/plugins
+
+# 2. 复制插件到 plugins 目录
+cp target/release/examples/my_tool target/release/plugins/
+```
+
+2. **插件加载**
+
+- 主程序启动时会自动扫描 `plugins` 目录
+- 每个可执行文件都会被尝试作为插件加载
+- 加载成功的插件会出现在工具列表中
+
+3. **插件调用**
+
+```rust
+// 插件工具会自动集成到 MCP 工具系统中
+// 可以像使用内置工具一样使用它们
+client.call_tool("my_tool", Some(json!({
+    "param1": "测试值"
+}))).await?;
+```
+
+### 示例插件
+
+项目提供了一个完整的示例插件 `examples/hello_world_plugin.rs`：
+
+```bash
+# 编译示例插件
+cargo build --example hello_world_plugin --release
+
+# 部署示例插件
+cp target/release/examples/hello_world_plugin target/release/plugins/
+```
+
+### 插件开发最佳实践
+
+1. **错误处理**
+   - 使用合适的错误类型和错误信息
+   - 在发生错误时确保通过 stderr 输出详细信息
+
+2. **参数验证**
+   - 在 `input_schema` 中明确定义所有参数
+   - 对必需参数进行严格检查
+
+3. **异步支持**
+   - 使用 `tokio` 运行时处理异步操作
+   - 正确处理异步资源的生命周期
+
+4. **日志记录**
+   - 使用 `tracing` 记录关键操作
+   - 保持合适的日志级别
+
+5. **资源管理**
+   - 及时释放占用的资源
+   - 正确处理进程信号
+
 ## 🔧 核心组件
 
 ### DeviceStatusChecker
