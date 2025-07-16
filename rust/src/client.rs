@@ -598,13 +598,7 @@ impl Client {
                     DeviceState::Listening => "👂",
                     DeviceState::Speaking => "🗣️",
                 };
-                
-                // println!("{} 状态变化: {} -> {}", 
-                //     status_emoji,
-                //     old_state,
-                //     new_state
-                // );
-                
+               
                 // 调用状态变化回调
                 if let Some(callback) = &callback {
                     callback(new_state);
