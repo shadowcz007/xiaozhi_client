@@ -23,9 +23,8 @@ impl StdioController {
         println!("\n🎮 控制命令：");
         println!("1. idle - 切换到空闲状态");
         // println!("2. listening - 开始监听 (手动模式)");
-        println!("2. always - 开始监听 (持续模式)");
-        println!("3. interrupt - 打断当前对话");
-        println!("4. quit - 退出程序\n");
+        println!("2. start - 开始监听 (持续模式)");
+        println!("3. stop - 打断当前对话"); 
 
         self.client.start_voice_chat(Some("hi")).await?;
 
@@ -39,27 +38,17 @@ impl StdioController {
                         println!("❌ 切换失败: {}", e);
                     }
                 },
-                // "listening" => {
-                //     println!("👂 开始监听 (手动模式)");
-                //     if let Err(e) = self.client.start_listening(ListeningMode::Manual).await {
-                //         println!("❌ 启动监听失败: {}", e);
-                //     }
-                // },
-                "always" => {
+                "start" => {
                     println!("👂 开始监听 (持续模式)");
                     if let Err(e) = self.client.start_listening(ListeningMode::AlwaysOn).await {
                         println!("❌ 启动监听失败: {}", e);
                     }
                 },
-                "interrupt" => {
+                "stop" => {
                     println!("✋ 打断对话");
                     if let Err(e) = self.client.interrupt_conversation().await {
                         println!("❌ 打断失败: {}", e);
                     }
-                },
-                "quit" => {
-                    println!("👋 正在退出...");
-                    break;
                 },
                 _ => {
                     println!("❓ 未知命令: {}", command);
