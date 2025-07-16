@@ -193,7 +193,7 @@ impl Client {
         let msg_type = json_data.get("type").and_then(|v| v.as_str());
 
         // 调试输出所有收到的消息类型和内容
-        println!("🔍 收到消息类型: {:?}, 完整数据: {}", msg_type, serde_json::to_string_pretty(&json_data).unwrap_or_default());
+        tracing::debug!("🔍 收到消息类型: {:?}, 完整数据: {}", msg_type, serde_json::to_string_pretty(&json_data).unwrap_or_default());
         
         match msg_type {
             Some("tts") => {
@@ -236,7 +236,6 @@ impl Client {
                 }
             }
             Some(other_type) => {
-                println!("📋 其他类型消息: {}, 数据: {}", other_type, serde_json::to_string_pretty(&json_data).unwrap_or_default());
                 tracing::info!("📋 其他消息类型: {}, 数据: {:?}", other_type, json_data);
             }
             None => {
@@ -260,7 +259,7 @@ impl Client {
 
         match state {
             Some("start") => {
-                println!("🗣️ 开始播放AI回复");
+                // println!("🗣️ 开始播放AI回复");
                 tracing::info!("🗣️ 开始播放AI回复");
             }
             Some("sentence_start") => {
@@ -290,7 +289,7 @@ impl Client {
                 // println!("🔍 TTS stop完整数据: {}", serde_json::to_string_pretty(&data).unwrap_or_default());
                 tracing::info!("🔍 TTS stop消息结构: {:?}", data);
 
-                println!("🔇 AI播放完成");
+                // println!("🔇 AI播放完成");
                 tracing::info!("🔇 AI回复播放完成");
 
                 Self::handle_tts_stop(
@@ -432,12 +431,12 @@ impl Client {
     /// 处理LLM消息
     fn handle_llm_message(data: serde_json::Value) {
         if let Some(emotion) = data.get("emotion").and_then(|v| v.as_str()) {
-            println!("💬 AI回复: {}", emotion);
-            tracing::info!("💬 AI回复内容: {}", emotion);
+            println!("💬 AI 表情: {}", emotion);
+            tracing::info!("💬 AI 表情: {}", emotion);
         } else {
-            println!("⚠️ 未找到AI回复内容 (emotion字段)");
+            println!("⚠️ 未找到AI表情 (emotion字段)");
             // 调试输出完整数据以便检查
-            println!("🔍 LLM完整数据: {}", serde_json::to_string_pretty(&data).unwrap_or_default());
+            println!("🔍 AI表情完整数据: {}", serde_json::to_string_pretty(&data).unwrap_or_default());
         }
     }
 
@@ -600,11 +599,11 @@ impl Client {
                     DeviceState::Speaking => "🗣️",
                 };
                 
-                println!("{} 状态变化: {} -> {}", 
-                    status_emoji,
-                    old_state,
-                    new_state
-                );
+                // println!("{} 状态变化: {} -> {}", 
+                //     status_emoji,
+                //     old_state,
+                //     new_state
+                // );
                 
                 // 调用状态变化回调
                 if let Some(callback) = &callback {
@@ -678,7 +677,7 @@ impl Client {
             tracing::debug!("🔍 停止录音后状态检查: is_recording={}", new_recording_state);
         }
 
-        println!("🎤 开始监听...");
+        // println!("🎤 开始监听...");
         tracing::info!("🎤 开始监听，模式: {:?}", mode);
 
         // 发送消息前，确保WebSocket是连接状态
@@ -770,7 +769,7 @@ impl Client {
 
         // 检查设备状态
         let status = recorder.check_device_status()?;
-        println!("设备状态: {:?}", status);
+        println!("设备名称: {:?}", status.name);
 
         // 开始录音
         let opus_receiver = recorder.start_recording()?;
