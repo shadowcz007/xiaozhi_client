@@ -88,7 +88,7 @@ impl WebSocketProtocol {
             connect_async_with_config(request, None, false)
         ).await;
 
-        let (ws_stream, response) = match connection_result {
+        let (ws_stream, _response) = match connection_result {
             Ok(Ok((stream, response))) => {
                 tracing::debug!("WebSocket连接建立: {:?}", response.status());
                 (stream, response)
