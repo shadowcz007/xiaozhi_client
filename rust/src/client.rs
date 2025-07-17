@@ -591,7 +591,7 @@ impl Client {
                 *state_guard = new_state;
                 
                 // 添加表情和状态输出
-                let status_emoji = match new_state {
+                let _status_emoji = match new_state {
                     DeviceState::Idle => "💤",
                     DeviceState::Connecting => "🔄",
                     DeviceState::Processing => "⏳",
