@@ -9,7 +9,7 @@ pub mod stdio_controller;
 pub mod mcp;
 
 pub use types::*;
-pub use device_status::DeviceStatusChecker;
+pub use device_status::{DeviceStatusChecker, ActivationInfo, DeviceStatusResult};
 pub use websocket::WebSocketProtocol;
 pub use voice::{MicrophoneOpusRecorder, NodeAudioPlayer};
 pub use client::Client;

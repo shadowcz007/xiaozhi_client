@@ -1,5 +1,5 @@
 use xiaozhi_client::{
-    init_logging, DeviceStatusChecker, Client, Config, StdioController
+    init_logging, DeviceStatusChecker, DeviceStatusResult, Client, Config, StdioController
 };
 use std::io::Write;
 use std::sync::Arc;
@@ -142,48 +142,69 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let checker = DeviceStatusChecker::new();
     let status = checker.check_device_status(&device_id, &device_name).await?;
     
-    if let Some(status_response) = status {
-        println!("✅ 设备已激活，正在初始化客户端...");
-        
-        // 创建配置
-        let config = Config::new(
-            status_response.websocket.url,
-            status_response.websocket.token,
-            device_id.to_string(),
-            status_response.mqtt.client_id,
-        );
-        
-        // 创建客户端
-        let mut client = Client::new(config)?;
-        
-        // 设置状态变化回调
-        client.set_state_change_callback(|state| {
-            println!("📱 状态变化: {:?}", state);
-        });
-        
-        // 将客户端包装在 Arc 中
-        let client = Arc::new(client);
-        
-        // 创建并启动 stdio 控制器
-        let controller = StdioController::new(Arc::clone(&client));
-        
-        // 启动异步任务
-        tokio::spawn(async move {
-            if let Err(e) = controller.start().await {
-                eprintln!("❌ 控制器启动错误: {:?}", e);
-            }
-        });
-        
-        // 等待程序退出信号
-        tokio::signal::ctrl_c().await?;
-        println!("\n👋 收到退出信号，正在清理...");
-        
-        // 断开连接
-        client.disconnect().await?;
-        
-    } else {
-        println!("❌ 设备需要先激活");
-        println!("💡 提示: 请先运行设备激活程序");
+    match status {
+        DeviceStatusResult::Activated(status_response) => {
+            // 设备已激活，正常启动
+            println!("✅ 设备已激活，正在初始化客户端...");
+            
+            // 添加调试信息
+            println!("🔍 调试信息:");
+            println!("   - 设备ID: {}", device_id);
+            println!("   - 设备名称: {}", device_name);
+            println!("   - WebSocket URL: {}", status_response.websocket.url);
+            println!("   - WebSocket Token: {}", status_response.websocket.token);
+            println!("   - MQTT Client ID: {}", status_response.mqtt.client_id);
+            println!("   - MQTT Endpoint: {}", status_response.mqtt.endpoint);
+            println!("   - Firmware URL: {}", status_response.firmware.url);
+            println!("   - Firmware Version: {}", status_response.firmware.version);
+            println!("   - Server Time: {}", status_response.server_time.timestamp);
+            println!();
+            
+            // 创建配置
+            let config = Config::new(
+                status_response.websocket.url,
+                status_response.websocket.token,
+                device_id.to_string(),
+                status_response.mqtt.client_id,
+            );
+            
+            // 创建客户端
+            let mut client = Client::new(config)?;
+            
+            // 设置状态变化回调
+            client.set_state_change_callback(|state| {
+                println!("📱 状态变化: {:?}", state);
+            });
+            
+            // 将客户端包装在 Arc 中
+            let client = Arc::new(client);
+            
+            // 创建并启动 stdio 控制器
+            let controller = StdioController::new(Arc::clone(&client));
+            
+            // 启动异步任务
+            tokio::spawn(async move {
+                if let Err(e) = controller.start().await {
+                    eprintln!("❌ 控制器启动错误: {:?}", e);
+                }
+            });
+            
+            // 等待程序退出信号
+            tokio::signal::ctrl_c().await?;
+            println!("\n👋 收到退出信号，正在清理...");
+            
+            // 断开连接
+            client.disconnect().await?;
+        }
+        DeviceStatusResult::NeedsActivation(activation_info) => {
+            // 设备需要激活，显示详细信息
+            println!("❌ 设备需要先激活");
+           
+        }
+        DeviceStatusResult::NeedsActivationNoInfo => {
+            println!("❌ 设备需要先激活");
+            println!("💡 提示: 请先运行设备激活程序");
+        }
     }
     
     Ok(())
