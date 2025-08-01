@@ -3,7 +3,7 @@
   "payload": {
     "version": 2,
     "mac_address": "c6:c5:8a:63:a5:ce",
-    "uuid": "fd06cc60-7aba-4a1f-b029-a3064f88fbe3",
+    "uuid": "a58f2675-d05b-444b-b21e-fec37b4ab9df",
     "hostname": "shadowdeMacBook-Pro-2.local",
     "serial_number": "SN-27BB0821-c6c58a63a5ce",
     "system": "darwin",
@@ -13,22 +13,22 @@
       "arch": "x64",
       "platform": "darwin"
     },
-    "timestamp": 1754035963190,
+    "timestamp": 1754037974463,
     "device_id": "c6:c5:8a:63:a5:ce"
   },
   "headers": {
     "Activation-Version": "2",
     "Device-Id": "c6:c5:8a:63:a5:ce",
-    "Client-Id": "fd06cc60-7aba-4a1f-b029-a3064f88fbe3",
+    "Client-Id": "a58f2675-d05b-444b-b21e-fec37b4ab9df",
     "Content-Type": "application/json",
     "User-Agent": "lifeOS/1.0.0"
   },
   "data": {
     "mqtt": {
       "endpoint": "mqtt.xiaozhi.me",
-      "client_id": "GID_test@@@c6_c5_8a_63_a5_ce@@@fd06cc60-7aba-4a1f-b029-a3064f88fbe3",
-      "username": "eyJpcCI6IjIxOS4yMjguMTQ2LjI1MyJ9",
-      "password": "buau+R4uogbX96s3zXxM2tf6TizIdg9zzvPoyA68l5Q=",
+      "client_id": "GID_test@@@c6_c5_8a_63_a5_ce@@@a58f2675-d05b-444b-b21e-fec37b4ab9df",
+      "username": "eyJpcCI6IjYxLjE2OS42Ny4yMjEifQ==",
+      "password": "3/vNsWr/jaxtSmNsmG1Xt/qjUBO9kqhQfMZVqdb6vSU=",
       "publish_topic": "device-server",
       "subscribe_topic": "null"
     },
@@ -37,7 +37,7 @@
       "token": "test-token"
     },
     "server_time": {
-      "timestamp": 1754035963716,
+      "timestamp": 1754037974837,
       "timezone_offset": 480
     },
     "firmware": {
@@ -47,7 +47,7 @@
     "activation": {
       "code": "348962",
       "message": "xiaozhi.me\n348962",
-      "challenge": "eae55a57-d7b9-498f-89ec-3e52ebaaaf9b"
+      "challenge": "3abfcf72-ea8f-4181-be94-7a6f9691ce32"
     }
   }
 }
