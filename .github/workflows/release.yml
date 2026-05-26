@@ -73,6 +73,28 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: '*/*'
-          generate_release_notes: true
+          body: |
+            ## 安装说明
+
+            ### macOS / Linux
+            ```bash
+            # 下载并运行安装脚本
+            curl -L https://github.com/shadowcz007/xiaozhi_client/releases/download/${{ github.ref_name }}/install.sh | bash
+            ```
+
+            ### Windows
+            下载并运行 `install.bat`
+
+            ## 或手动安装
+            下载对应平台的二进制文件，添加到 PATH即可。
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload install scripts
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-scripts
+          path: |
+            install.sh
+            install.bat
+          retention-days: 30
