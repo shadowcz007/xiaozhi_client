@@ -2,17 +2,41 @@ use std::collections::HashMap;
 use std::io::{self, Read};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use nokhwa::{Camera, utils::{CameraFormat, FrameFormat, CameraIndex, RequestedFormat, RequestedFormatType}, NokhwaError};
-use nokhwa::pixel_format::{RgbFormat};
-use reqwest;
+use nokhwa::pixel_format::RgbFormat;
 use serde_json::{json, Value};
 use xiaozhi_client::mcp::types::{Content, Tool, ToolsCallResult};
-use xiaozhi_client::types::{Result, ClientError};
+use xiaozhi_client::types::{ClientError, Result};
 
-const API_ENDPOINT: &str = "https://api.siliconflow.cn/v1/chat/completions";
-const API_KEY: &str = "Bearer sk-lvhkywnelbagndelvwljzhxqlornzodpmladzhochingimkw";
+const API_ENDPOINT: &str = "http://localhost:1234/api/v1/chat";
+const MODEL: &str = "google/gemma-4-e4b";
 
-// 包装 NokhwaError
-#[derive(Debug)]
+fn get_env_or_default(key: &str, default: &str) -> String {
+    std::env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+/// 定义工具
+fn get_tool() -> Tool {
+    Tool {
+        name: "camera_vision".to_string(),
+        description: "使用摄像头拍照并进行图像识别分析".to_string(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "camera_index": {
+                    "type": "integer",
+                    "description": "摄像头索引，默认为0（通常是内置摄像头）",
+                    "default": 0
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "图像识别描述",
+                    "default": "请详细描述这张图片，包括主要内容和场景"
+                }
+            }
+        }),
+    }
+}
+
 struct CameraError(NokhwaError);
 
 impl From<CameraError> for ClientError {
@@ -21,122 +45,89 @@ impl From<CameraError> for ClientError {
     }
 }
 
-/// 定义工具
-fn get_tool() -> Tool {
-    Tool {
-        name: "camera_vision".to_string(),
-        description: "使用摄像头拍照,自拍,并进行图像识别分析".to_string(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "camera_index": {
-                    "type": "integer",
-                    "description": "摄像头索引，默认为0（通常是内置摄像头）",
-                    "default": 0
-                }
-            }
-        }),
-    }
-}
-
-/// 初始化并获取摄像头实例
 fn init_camera(camera_index: i32) -> Result<Camera> {
     let index = CameraIndex::Index(camera_index as u32);
     let requested = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(
         CameraFormat::new_from(640, 480, FrameFormat::MJPEG, 30)
     ));
-    
+
     Camera::new(index, requested)
-        .map_err(|e| {
-            eprintln!("摄像头初始化失败: {:?}", e);
-            CameraError(e).into()
-        })
+        .map_err(|e| CameraError(e).into())
 }
 
-/// 捕获图像
 async fn capture_image(camera: &mut Camera) -> Result<Vec<u8>> {
     camera.open_stream()
-        .map_err(|e| {
-            eprintln!("打开视频流失败: {:?}", e);
-            CameraError(e)
-        })?;
+        .map_err(|e| CameraError(e))?;
 
     let frame = camera.frame()
-        .map_err(|e| {
-            eprintln!("捕获图像失败: {:?}", e);
-            CameraError(e)
-        })?;
+        .map_err(|e| CameraError(e))?;
 
     let raw_image = frame.buffer().to_vec();
 
     camera.stop_stream()
-        .map_err(|e| {
-            eprintln!("关闭视频流失败: {:?}", e);
-            CameraError(e)
-        })?;
+        .map_err(|e| CameraError(e))?;
 
     Ok(raw_image)
 }
 
-/// 发送API请求进行图像分析
-async fn analyze_image(base64_image: String) -> Result<String> {
+async fn analyze_image(base64_image: String, prompt: &str) -> Result<String> {
+    let api_token = get_env_or_default("LM_API_TOKEN", "lm-studio");
+    let endpoint = get_env_or_default("VISION_API_ENDPOINT", API_ENDPOINT);
+    let model = get_env_or_default("VISION_MODEL", MODEL);
+
     let client = reqwest::Client::new();
     let response = client
-        .post(API_ENDPOINT)
-        .header("Authorization", API_KEY)
+        .post(&endpoint)
+        .header("Authorization", format!("Bearer {}", api_token))
         .header("Content-Type", "application/json")
         .json(&json!({
-            "model": "THUDM/GLM-4.1V-9B-Thinking",
-            "stream": false,
-            "max_tokens": 512,
-            "min_p": 0.05,
-            "temperature": 0.7,
-            "top_p": 0.7,
-            "top_k": 50,
-            "frequency_penalty": 0.5,
-            "n": 1,
-            "stop": [],
-            "messages": [
+            "model": model,
+            "input": [
                 {
-                    "role": "system",
-                    "content": "请用100字以内详细描述这张图片。包括：1. 主要内容和场景 2. 人物的数量、外貌、表情、动作 3. 场景的氛围和光线 4. 重要的物体和细节 5. 画面的构图和视角。使用简洁清晰的语言。"
+                    "type": "text",
+                    "content": prompt
                 },
                 {
-                    "role": "user",
-                    "content": [
-                        {
-                            "image_url": {
-                                "detail": "auto",
-                                "url": format!("data:image/jpeg;base64,{}", base64_image)
-                            },
-                            "type": "image_url"
-                        }
-                    ]
+                    "type": "image",
+                    "data_url": format!("data:image/png;base64,{}", base64_image)
                 }
-            ]
+            ],
+            "context_length": 2048,
+            "temperature": 0
         }))
         .send()
-        .await?;
+        .await
+        .map_err(|e| ClientError::Internal(format!("请求失败: {}", e)))?;
 
     let response_text = response.text().await?;
-    
+
     let result: Value = serde_json::from_str(&response_text)
         .map_err(|e| ClientError::Internal(format!("JSON解析失败: {}", e)))?;
-    
-    Ok(result["choices"][0]["message"]["content"]
-        .as_str()
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "无法解析识别结果".to_string()))
+
+    // 尝试多种响应格式
+    if let Some(content) = result.get("output")
+        .or_else(|| result.get("content"))
+        .or_else(|| result.pointer("/response/content"))
+        .or_else(|| result.pointer("/choices/0/message/content"))
+    {
+        if let Some(text) = content.as_str() {
+            return Ok(text.to_string());
+        }
+    }
+
+    // 打印原始响应以便调试
+    tracing::debug!("API响应: {}", response_text);
+
+    Ok(format!("识别完成 (原始响应: {})", response_text))
 }
 
-async fn capture_and_analyze(camera_index: i32) -> Result<String> {
+async fn capture_and_analyze(camera_index: i32, prompt: &str) -> Result<String> {
     let mut camera = init_camera(camera_index)?;
     let raw_image = capture_image(&mut camera).await?;
     let base64_image = BASE64.encode(&raw_image);
-    analyze_image(base64_image).await
+    analyze_image(base64_image, prompt).await
 }
 
-/// 执行工具
 async fn handle(arguments: Option<HashMap<String, Value>>) -> Result<ToolsCallResult> {
     let camera_index = arguments
         .as_ref()
@@ -144,7 +135,13 @@ async fn handle(arguments: Option<HashMap<String, Value>>) -> Result<ToolsCallRe
         .and_then(|v| v.as_i64())
         .unwrap_or(0) as i32;
 
-    match capture_and_analyze(camera_index).await {
+    let prompt = arguments
+        .as_ref()
+        .and_then(|args| args.get("prompt"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("请详细描述这张图片，包括主要内容、场景、人物和物体");
+
+    match capture_and_analyze(camera_index, prompt).await {
         Ok(description) => Ok(ToolsCallResult {
             content: vec![Content::Text {
                 text: format!("图像识别结果：{}", description),
@@ -182,7 +179,7 @@ async fn main() {
     } else {
         String::from_utf8_lossy(&buffer).into_owned()
     };
-    
+
     let cleaned_input = input_str.trim().replace('\r', "").replace('\n', "");
 
     let arguments: Option<HashMap<String, Value>> = if cleaned_input.is_empty() {
@@ -218,4 +215,4 @@ async fn main() {
             std::process::exit(1);
         }
     }
-} 
+}
