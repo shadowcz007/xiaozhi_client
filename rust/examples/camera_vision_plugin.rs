@@ -189,14 +189,20 @@ async fn analyze_image(jpeg_data: Vec<u8>, prompt: &str) -> Result<String> {
     let result: Value = serde_json::from_str(&response_text)
         .map_err(|e| ClientError::Internal(format!("JSON解析失败: {}", e)))?;
 
-    if let Some(content) = result.get("output")
-        .or_else(|| result.get("content"))
-        .or_else(|| result.pointer("/response/content"))
-        .or_else(|| result.pointer("/choices/0/message/content"))
-    {
-        if let Some(text) = content.as_str() {
-            return Ok(text.to_string());
+    // 尝试从 output 数组中找到 type="message" 的内容
+    if let Some(output_array) = result.get("output").and_then(|v| v.as_array()) {
+        for item in output_array {
+            if item.get("type").and_then(|t| t.as_str()) == Some("message") {
+                if let Some(content) = item.get("content").and_then(|c| c.as_str()) {
+                    return Ok(content.to_string());
+                }
+            }
         }
+    }
+
+    // 备选：直接取 content 字段
+    if let Some(content) = result.get("content").and_then(|c| c.as_str()) {
+        return Ok(content.to_string());
     }
 
     tracing::debug!("API响应: {}", response_text);
