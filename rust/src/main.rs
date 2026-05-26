@@ -375,13 +375,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .help("设备ID")
                 .default_value("9b:9b:f3:50:dc:17"),
         )
-        .arg(
-            Arg::new("device-name")
-                .long("device-name")
-                .value_name("DEVICE_NAME")
-                .help("设备名称")
-                .default_value("goodmate"),
-        )
         .get_matches();
 
     if matches.get_flag("manage") {
@@ -410,7 +403,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
 
     let device_id = matches.get_one::<String>("device-id").unwrap();
-    let device_name = matches.get_one::<String>("device-name").unwrap();
+
+    // 从已保存的设备中获取 device_name
+    let manager = DeviceManager::new();
+    let device_name = manager
+        .get_device(device_id)
+        .map(|d| d.device_name.clone())
+        .unwrap_or_else(|| "goodmate".to_string());
 
     println!("正在检查设备状态...");
     println!("设备ID: {}", device_id);
