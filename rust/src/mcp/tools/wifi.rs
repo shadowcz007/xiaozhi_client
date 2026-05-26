@@ -17,34 +17,86 @@ pub fn get_tool() -> Tool {
 fn get_wifi_info() -> std::io::Result<Value> {
     #[cfg(target_os = "macos")]
     {
-        // 方法1: 使用 networksetup 获取 WiFi 信息
-        let output = Command::new("networksetup")
-            .args(["-getairportnetwork", "en0"])
+        let mut info = serde_json::Map::new();
+
+        // 方法1: 使用 system_profiler 获取 WiFi 信息
+        let output = Command::new("system_profiler")
+            .args(["SPNetworkDataType", "-json"])
             .output()?;
 
-        let mut info = serde_json::Map::new();
-        let output_str = String::from_utf8_lossy(&output.stdout);
-
-        if output_str.contains("Off") || output_str.contains("You are not") {
-            info.insert("status".to_string(), Value::String("disconnected".to_string()));
-        } else {
-            info.insert("status".to_string(), Value::String("connected".to_string()));
-            // 移除 "Current Wi-Fi Network: " 前缀
-            let ssid = output_str.trim().replace("Current Wi-Fi Network: ", "");
-            info.insert("ssid".to_string(), Value::String(ssid));
+        if output.status.success() {
+            if let Ok(json) = serde_json::from_slice::<Value>(&output.stdout) {
+                if let Some(network) = json.get("SPNetworkDataType") {
+                    if let Some(items) = network.as_array() {
+                        for item in items {
+                            if item.get("type").and_then(|t| t.as_str()) == Some("Wi-Fi") {
+                                if let Some(interface) = item.get("interface") {
+                                    info.insert("interface".to_string(), interface.clone());
+                                }
+                                if let Some(ssid) = item.get("ssid") {
+                                    info.insert("ssid".to_string(), ssid.clone());
+                                }
+                                if let Some(signal) = item.get("signal_strength") {
+                                    info.insert("signal_strength".to_string(), signal.clone());
+                                }
+                                if let Some(noise) = item.get("noise") {
+                                    info.insert("noise".to_string(), noise.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        // 方法2: 获取 WiFi 接口信息
-        if let Ok(output) = Command::new("networksetup")
-            .args(["-getinfo", "Wi-Fi"])
-            .output()
-        {
-            let output_str = String::from_utf8_lossy(&output.stdout);
-            for line in output_str.lines() {
-                if line.contains("Signal strength:") {
-                    if let Some(value) = line.split(':').nth(1) {
-                        info.insert("signal_strength".to_string(), Value::String(value.trim().to_string()));
+        // 方法2: 检查 WiFi 端口是否开启
+        let airport_output = Command::new("networksetup")
+            .args(["-getairportnetwork", "en0"])
+            .output()?;
+        let airport_str = String::from_utf8_lossy(&airport_output.stdout);
+
+        if airport_str.contains("You are not associated") {
+            // WiFi 可能断开或者用其他方式检测
+            let _ = info.insert("status".to_string(), Value::String("unknown".to_string()));
+        } else {
+            let ssid = airport_str.trim().replace("Current Wi-Fi Network: ", "");
+            info.insert("status".to_string(), Value::String("connected".to_string()));
+            if !ssid.is_empty() && ssid != "On" {
+                info.insert("ssid".to_string(), Value::String(ssid));
+            }
+        }
+
+        // 方法3: 直接读取 airport 路径（如果存在）
+        if info.get("ssid").is_none() {
+            if let Ok(output) = Command::new("/usr/local/bin/airport")
+                .arg("-I")
+                .output()
+            {
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                for line in output_str.lines() {
+                    if line.contains("SSID:") {
+                        if let Some(ssid) = line.split(':').nth(1) {
+                            let ssid = ssid.trim();
+                            if !ssid.is_empty() {
+                                info.insert("ssid".to_string(), Value::String(ssid.to_string()));
+                                info.insert("status".to_string(), Value::String("connected".to_string()));
+                            }
+                        }
                     }
+                }
+            }
+        }
+
+        // 如果还没有 ssid但有 IP，说明已连接
+        if info.get("ssid").is_none() {
+            let ip_output = Command::new("ipconfig")
+                .args(["getifaddr", "en0"])
+                .output()?;
+            if ip_output.status.success() {
+                let ip = String::from_utf8_lossy(&ip_output.stdout).trim().to_string();
+                if !ip.is_empty() && ip != "0.0.0.0" {
+                    info.insert("status".to_string(), Value::String("connected".to_string()));
+                    info.insert("ip".to_string(), Value::String(ip));
                 }
             }
         }
@@ -127,14 +179,37 @@ fn get_wifi_info() -> std::io::Result<Value> {
 pub async fn handle() -> Result<ToolsCallResult> {
     match get_wifi_info() {
         Ok(wifi_info) => {
-            tracing::info!("📶 获取WiFi状态成功");
+            tracing::info!("📶 获取WiFi状态成功: {:?}", wifi_info);
+
+            // 生成友好提示
+            let status = wifi_info.get("status").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let ssid = wifi_info.get("ssid").and_then(|v| v.as_str());
+            tracing::debug!("WiFi status: {}, ssid: {:?}", status, ssid);
+
+            let text = if status == "disconnected" {
+                "WiFi 未连接".to_string()
+            } else if status == "connected" {
+                if let Some(name) = ssid {
+                    format!("已连接到 {}", name)
+                } else {
+                    "WiFi 已连接".to_string()
+                }
+            } else {
+                // unknown 状态可能是：以太网连接、有线连接中、或 WiFi 未激活
+                if let Some(ip) = wifi_info.get("ip").and_then(|v| v.as_str()) {
+                    if !ip.is_empty() && ip != "0.0.0.0" {
+                        return Ok(ToolsCallResult {
+                            content: vec![Content::Text { text: "当前使用有线网络".to_string() }],
+                            is_error: None,
+                        });
+                    }
+                }
+                "WiFi 未开启或未连接".to_string()
+            };
+
+            tracing::debug!("返回文本: {}", text);
             Ok(ToolsCallResult {
-                content: vec![Content::Text {
-                    text: format!(
-                        "📶 WiFi状态:\n{}",
-                        serde_json::to_string_pretty(&wifi_info)?
-                    ),
-                }],
+                content: vec![Content::Text { text }],
                 is_error: None,
             })
         }
@@ -142,7 +217,7 @@ pub async fn handle() -> Result<ToolsCallResult> {
             tracing::error!("📶 获取WiFi状态失败: {}", e);
             Ok(ToolsCallResult {
                 content: vec![Content::Text {
-                    text: format!("❌ 获取WiFi状态失败: {}", e),
+                    text: "获取 WiFi 状态失败".to_string(),
                 }],
                 is_error: Some(true),
             })
