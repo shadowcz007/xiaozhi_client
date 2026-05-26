@@ -372,8 +372,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Arg::new("device-id")
                 .long("device-id")
                 .value_name("DEVICE_ID")
-                .help("设备ID")
-                .default_value("9b:9b:f3:50:dc:17"),
+                .help("设备ID"),
         )
         .get_matches();
 
@@ -402,12 +401,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     init_logging();
 
-    let device_id = matches.get_one::<String>("device-id").unwrap();
-
-    // 从已保存的设备中获取 device_name
+    // 获取设备ID：优先使用命令行参数，否则使用当前设备
     let manager = DeviceManager::new();
+    let device_id = if let Some(id) = matches.get_one::<String>("device-id") {
+        id.clone()
+    } else if let Some(current) = manager.get_current_device() {
+        current.device_id.clone()
+    } else {
+        eprintln!("没有指定设备，请使用 --device-id 或在管理模式下设置当前设备");
+        process::exit(1);
+    };
+
     let device_name = manager
-        .get_device(device_id)
+        .get_device(&device_id)
         .map(|d| d.device_name.clone())
         .unwrap_or_else(|| "goodmate".to_string());
 
