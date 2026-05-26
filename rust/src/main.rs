@@ -355,10 +355,17 @@ async fn run_device_manager() -> Result<(), Box<dyn std::error::Error>> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let matches = Command::new("XiaoZhi Client")
+    let matches = Command::new("小智语音助手客户端")
         .version("0.1.0")
         .author("shadow")
-        .about("小智语音助手客户端")
+        .about("XiaoZhi Voice Assistant Client - 基于 Rust 开发的智能语音助手")
+        .long_about(
+            "小智语音助手客户端\n\n\
+            一款基于 Rust 开发的智能语音助手，支持实时语音对话、多设备管理。\n\n\
+            使用示例:\n  xiaozhi_client --manage                      # 设备管理\n  xiaozhi_client --device-id <ID>            # 启动语音助手\n  xiaozhi_client --activate                   # 激活当前设备\n\n\
+            GitHub: https://github.com/shadowcz007/xiaozhi_client\n\
+            作者: shadow",
+        )
         .arg(Arg::new("manage").long("manage").action(clap::ArgAction::SetTrue).help("进入设备管理模式"))
         .arg(Arg::new("activate").long("activate").action(clap::ArgAction::SetTrue).help("激活设备"))
         .arg(
