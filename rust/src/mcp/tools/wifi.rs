@@ -17,30 +17,35 @@ pub fn get_tool() -> Tool {
 fn get_wifi_info() -> std::io::Result<Value> {
     #[cfg(target_os = "macos")]
     {
-        let output = Command::new("/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport")
-            .arg("-I")
+        // 方法1: 使用 networksetup 获取 WiFi 信息
+        let output = Command::new("networksetup")
+            .args(["-getairportnetwork", "en0"])
             .output()?;
 
-        let output_str = String::from_utf8_lossy(&output.stdout);
         let mut info = serde_json::Map::new();
+        let output_str = String::from_utf8_lossy(&output.stdout);
 
-        for line in output_str.lines() {
-            if let Some((key, value)) = line.split_once(':') {
-                let key = key.trim();
-                let value = value.trim();
+        if output_str.contains("Off") || output_str.contains("You are not") {
+            info.insert("status".to_string(), Value::String("disconnected".to_string()));
+        } else {
+            info.insert("status".to_string(), Value::String("connected".to_string()));
+            // 移除 "Current Wi-Fi Network: " 前缀
+            let ssid = output_str.trim().replace("Current Wi-Fi Network: ", "");
+            info.insert("ssid".to_string(), Value::String(ssid));
+        }
 
-                match key {
-                    "SSID" => info.insert("ssid".to_string(), Value::String(value.to_string())),
-                    "agrCtlRSSI" => info.insert(
-                        "signal_strength".to_string(),
-                        Value::String(value.to_string()),
-                    ),
-                    "lastTxRate" => {
-                        info.insert("tx_rate".to_string(), Value::String(value.to_string()))
+        // 方法2: 获取 WiFi 接口信息
+        if let Ok(output) = Command::new("networksetup")
+            .args(["-getinfo", "Wi-Fi"])
+            .output()
+        {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            for line in output_str.lines() {
+                if line.contains("Signal strength:") {
+                    if let Some(value) = line.split(':').nth(1) {
+                        info.insert("signal_strength".to_string(), Value::String(value.trim().to_string()));
                     }
-                    "MCS" => info.insert("mcs".to_string(), Value::String(value.to_string())),
-                    _ => None,
-                };
+                }
             }
         }
 
