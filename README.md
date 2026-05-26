@@ -114,6 +114,12 @@ cargo run -- --manage
 
 示例插件见 `examples/` 目录。
 
+## 交流社群
+
+微信关注公众号：**Mixlab无界社区**
+
+![Mixlab无界社区](https://img.shields.io/badge/Mixlab-无界社区-256x256)
+
 ## License
 
 MIT
