@@ -140,13 +140,24 @@ async fn capture_image(camera: &mut Camera) -> Result<Vec<u8>> {
         }
     };
 
+    // 压缩图片尺寸（最大 640 宽度，保持比例）
+    let max_width = 640u32;
+    let (new_width, new_height) = if width > max_width {
+        let ratio = max_width as f32 / width as f32;
+        (max_width, (height as f32 * ratio) as u32)
+    } else {
+        (width, height)
+    };
+
     // 转换为 JPEG 格式
     let mut jpeg_data = Vec::new();
     let img = image::RgbImage::from_raw(width, height, rgb_data)
         .ok_or_else(|| ClientError::Internal("无法创建图像".to_string()))?;
 
+    let resized = image::imageops::resize(&img, new_width, new_height, image::imageops::FilterType::Triangle);
+
     let mut cursor = Cursor::new(&mut jpeg_data);
-    img.write_to(&mut cursor, image::ImageFormat::Jpeg)
+    resized.write_to(&mut cursor, image::ImageFormat::Jpeg)
         .map_err(|e| ClientError::Internal(format!("JPEG编码失败: {}", e)))?;
 
     camera.stop_stream()
