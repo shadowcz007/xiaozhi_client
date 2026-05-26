@@ -20,7 +20,9 @@ pub struct Plugin {
 pub fn load_plugins() -> Result<Vec<Plugin>> {
     let mut plugins = Vec::new();
     let exe_path = env::current_exe()?;
-    let exe_dir = exe_path.parent().ok_or_else(|| ClientError::Internal("无法获取可执行文件目录".to_string()))?;
+    let exe_dir = exe_path
+        .parent()
+        .ok_or_else(|| ClientError::Internal("无法获取可执行文件目录".to_string()))?;
     let plugins_dir = exe_dir.join("plugins");
 
     tracing::info!("🔌 扫描插件目录: {:?}", plugins_dir);
@@ -104,4 +106,4 @@ pub async fn execute_plugin(
 
     let result: ToolsCallResult = serde_json::from_slice(&output.stdout)?;
     Ok(result)
-} 
+}

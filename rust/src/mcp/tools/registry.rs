@@ -1,11 +1,11 @@
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Weak;
-use serde_json::Value;
 
-use crate::types::{Result, ClientError};
-use crate::mcp::types::{Tool, ToolsCallParams, ToolsCallResult};
-use super::{wifi, plugin_manager};
 use super::plugin_manager::Plugin;
+use super::{plugin_manager, wifi};
+use crate::mcp::types::{Tool, ToolsCallParams, ToolsCallResult};
+use crate::types::{ClientError, Result};
 
 /// 用于区分工具来源
 #[derive(Debug, Clone)]
@@ -49,10 +49,10 @@ pub fn initialize_tools() -> Vec<ToolSource> {
 
 /// 处理工具调用
 pub async fn handle_tools_call(
-    id: Value, 
-    params: ToolsCallParams, 
+    id: Value,
+    params: ToolsCallParams,
     tools: &[ToolSource],
-    _client_ref: &Option<Weak<crate::client::Client>>
+    _client_ref: &Option<Weak<crate::client::Client>>,
 ) -> Result<Option<Value>> {
     // 查找工具
     let tool_source = tools.iter().find(|t| t.get_tool().name == params.name);
@@ -62,7 +62,12 @@ pub async fn handle_tools_call(
             // 调用内置工具
             match tool.name.as_str() {
                 "get_wifi_status" => wifi::handle().await?,
-                _ => return Err(ClientError::Internal(format!("未知的内置工具: {}", tool.name))),
+                _ => {
+                    return Err(ClientError::Internal(format!(
+                        "未知的内置工具: {}",
+                        tool.name
+                    )))
+                }
             }
         }
         Some(ToolSource::Plugin(plugin)) => {
@@ -70,7 +75,10 @@ pub async fn handle_tools_call(
             plugin_manager::execute_plugin(plugin, params.arguments).await?
         }
         None => {
-            return Err(ClientError::Internal(format!("未找到工具: {}", params.name)));
+            return Err(ClientError::Internal(format!(
+                "未找到工具: {}",
+                params.name
+            )));
         }
     };
 
@@ -81,4 +89,4 @@ pub async fn handle_tools_call(
     });
 
     Ok(Some(response))
-} 
+}

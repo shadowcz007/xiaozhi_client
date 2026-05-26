@@ -101,19 +101,11 @@ pub enum WebSocketMessage {
         audio_params: AudioParams,
     },
     #[serde(rename = "text")]
-    Text {
-        content: String,
-        timestamp: i64,
-    },
+    Text { content: String, timestamp: i64 },
     #[serde(rename = "audio")]
-    Audio {
-        data: Vec<u8>,
-        timestamp: i64,
-    },
+    Audio { data: Vec<u8>, timestamp: i64 },
     #[serde(rename = "interrupt")]
-    Interrupt {
-        timestamp: i64,
-    },
+    Interrupt { timestamp: i64 },
 }
 
 /// 设备状态响应
@@ -180,19 +172,19 @@ pub struct DeviceData {
 pub enum ClientError {
     #[error("网络错误: {0}")]
     NetworkError(#[from] reqwest::Error),
-    
+
     #[error("音频错误: {0}")]
     AudioError(String),
-    
+
     #[error("Opus编解码错误: {0}")]
     OpusError(#[from] opus::Error),
-    
+
     #[error("WebSocket错误: {0}")]
     WebSocketError(#[from] tokio_tungstenite::tungstenite::Error),
-    
+
     #[error("JSON错误: {0}")]
     JsonError(#[from] serde_json::Error),
-    
+
     #[error("设备状态无效: {0}")]
     InvalidDeviceStatus(String),
 
@@ -237,18 +229,16 @@ impl ClientError {
 
     /// 检查是否为网络相关错误
     pub fn is_network_error(&self) -> bool {
-        matches!(self, 
-            ClientError::NetworkError(_) | 
-            ClientError::WebSocketError(_) | 
-            ClientError::ConnectionTimeout
+        matches!(
+            self,
+            ClientError::NetworkError(_)
+                | ClientError::WebSocketError(_)
+                | ClientError::ConnectionTimeout
         )
     }
 
     /// 检查是否为音频相关错误
     pub fn is_audio_error(&self) -> bool {
-        matches!(self, 
-            ClientError::AudioError(_) | 
-            ClientError::OpusError(_)
-        )
+        matches!(self, ClientError::AudioError(_) | ClientError::OpusError(_))
     }
-} 
+}

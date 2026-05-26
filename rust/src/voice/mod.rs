@@ -1,5 +1,5 @@
-pub mod recorder;
 pub mod player;
+pub mod recorder;
 
+pub use player::NodeAudioPlayer;
 pub use recorder::MicrophoneOpusRecorder;
-pub use player::NodeAudioPlayer; 

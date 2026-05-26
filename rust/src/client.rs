@@ -1,13 +1,13 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::types::{DeviceState, ListeningMode, Result, ClientError};
 use crate::config::Config;
-use crate::websocket::{WebSocketProtocol, WebSocketEvent};
+use crate::mcp::{types::MCPMessage, MCPProtocol};
+use crate::types::{ClientError, DeviceState, ListeningMode, Result};
 use crate::voice::{MicrophoneOpusRecorder, NodeAudioPlayer};
-use crate::mcp::{MCPProtocol, types::MCPMessage};
+use crate::websocket::{WebSocketEvent, WebSocketProtocol};
 
 /// 客户端状态变化回调类型
 pub type StateChangeCallback = Arc<dyn Fn(DeviceState) + Send + Sync>;
@@ -23,7 +23,7 @@ pub struct Client {
     aborted: Arc<AtomicBool>,
     is_recording_from_mic: Arc<AtomicBool>,
     mcp_protocol: Arc<Mutex<MCPProtocol>>,
-    
+
     // 回调函数
     pub on_state_changed: Option<StateChangeCallback>,
 }
@@ -35,10 +35,8 @@ impl Client {
     /// 创建新的客户端实例
     pub fn new(config: Config) -> Result<Self> {
         let protocol = WebSocketProtocol::new(config.clone());
-        let mut player = NodeAudioPlayer::new(
-            config.audio.output_sample_rate,
-            config.audio.channels
-        )?;
+        let mut player =
+            NodeAudioPlayer::new(config.audio.output_sample_rate, config.audio.channels)?;
 
         // 设置播放完成回调
         player.set_playback_finished_callback(|| {
@@ -108,7 +106,7 @@ impl Client {
         // 如果提供了hello消息，则发送欢迎消息开始对话
         if let Some(hello_text) = hello {
             self.send_text_message(hello_text).await?;
-        }else{
+        } else {
             // 如果没有 hello 消息,直接开始监听
             self.start_listening(ListeningMode::AlwaysOn).await?;
         }
@@ -129,7 +127,7 @@ impl Client {
             while let Some(event) = event_receiver.recv().await {
                 // 增加调试日志
                 match &event {
-                    WebSocketEvent::IncomingAudio(_) => {},
+                    WebSocketEvent::IncomingAudio(_) => {}
                     e => tracing::info!("[调试] 接收到WebSocket事件: {:?}", e),
                 }
 
@@ -163,7 +161,16 @@ impl Client {
                         }
                     }
                     WebSocketEvent::IncomingJson(json_data) => {
-                        Self::handle_incoming_json(json_data, &device_state, &player, &keep_listening, &aborted, &callback, &client).await;
+                        Self::handle_incoming_json(
+                            json_data,
+                            &device_state,
+                            &player,
+                            &keep_listening,
+                            &aborted,
+                            &callback,
+                            &client,
+                        )
+                        .await;
                     }
                     WebSocketEvent::NetworkError(error) => {
                         tracing::error!("❌ 网络错误: {}", error);
@@ -193,29 +200,43 @@ impl Client {
         let msg_type = json_data.get("type").and_then(|v| v.as_str());
 
         // 调试输出所有收到的消息类型和内容
-        tracing::debug!("🔍 收到消息类型: {:?}, 完整数据: {}", msg_type, serde_json::to_string_pretty(&json_data).unwrap_or_default());
-        
+        tracing::debug!(
+            "🔍 收到消息类型: {:?}, 完整数据: {}",
+            msg_type,
+            serde_json::to_string_pretty(&json_data).unwrap_or_default()
+        );
+
         match msg_type {
             Some("tts") => {
-                Self::handle_tts_message(json_data, device_state, player, keep_listening, aborted, callback, client).await;
+                Self::handle_tts_message(
+                    json_data,
+                    device_state,
+                    player,
+                    keep_listening,
+                    aborted,
+                    callback,
+                    client,
+                )
+                .await;
             }
             Some("stt") => {
                 Self::handle_stt_message(json_data);
             }
             Some("llm") => {
                 Self::handle_llm_message(json_data);
-                
+
                 // 在收到LLM消息后，自动开始监听
                 let current_state = {
                     let state_guard = device_state.lock().await;
                     *state_guard
                 };
-                
+
                 // 从Processing或Idle状态都可以开始监听
-                if (current_state == DeviceState::Processing || current_state == DeviceState::Idle) 
-                   && keep_listening.load(Ordering::Relaxed) {
+                if (current_state == DeviceState::Processing || current_state == DeviceState::Idle)
+                    && keep_listening.load(Ordering::Relaxed)
+                {
                     tracing::info!("🎤 收到LLM消息，从{}状态准备开始监听", current_state);
-                    
+
                     // 实际启动监听功能
                     if let Err(e) = client.start_listening(ListeningMode::AlwaysOn).await {
                         tracing::error!("收到LLM消息后启动监听失败: {}", e);
@@ -239,7 +260,10 @@ impl Client {
                 tracing::info!("📋 其他消息类型: {}, 数据: {:?}", other_type, json_data);
             }
             None => {
-                println!("⚠️ 消息没有type字段: {}", serde_json::to_string_pretty(&json_data).unwrap_or_default());
+                println!(
+                    "⚠️ 消息没有type字段: {}",
+                    serde_json::to_string_pretty(&json_data).unwrap_or_default()
+                );
                 tracing::info!("⚠️ 无类型消息: {:?}", json_data);
             }
         }
@@ -267,15 +291,15 @@ impl Client {
                     println!("🗣️ TTS: {}", text);
                     tracing::info!("🗣️ TTS文本: {}", text);
                 }
-                
+
                 // 在TTS开始时强制停止录音，确保状态一致性
                 let was_recording = client.is_recording_from_mic.load(Ordering::Relaxed);
                 tracing::debug!("🔍 TTS开始时录音状态检查: is_recording={}", was_recording);
-                
+
                 // 不管当前状态如何，都尝试停止录音以确保状态一致性
                 tracing::info!("🛑 TTS开始，强制停止录音以确保状态一致性");
                 client.stop_microphone_recording().await;
-                
+
                 let mut state_guard = device_state.lock().await;
                 *state_guard = DeviceState::Speaking;
                 if let Some(cb) = callback {
@@ -308,7 +332,7 @@ impl Client {
                 let mut player_guard = player.lock().await;
                 player_guard.stop();
                 drop(player_guard);
-                
+
                 // AI回复被打断后，如果启用持续监听，则重新开始监听
                 if keep_listening.load(Ordering::Relaxed) {
                     let mut state_guard = device_state.lock().await;
@@ -317,7 +341,7 @@ impl Client {
                         cb(DeviceState::Listening);
                     }
                     drop(state_guard);
-                    
+
                     tracing::info!("🎤 AI回复被打断，重新开始监听");
                     if let Err(e) = client.start_listening(ListeningMode::AlwaysOn).await {
                         tracing::error!("AI回复被打断后重新启动监听失败: {}", e);
@@ -353,11 +377,11 @@ impl Client {
             // 根据是否启用持续监听来决定下一个状态
             let should_start_listening = keep_listening.load(Ordering::Relaxed);
             tracing::debug!("🔍 TTS停止检查: keep_listening={}", should_start_listening);
-            
+
             let next_state = if should_start_listening {
-                DeviceState::Listening  // TTS停止后直接切换到监听状态
+                DeviceState::Listening // TTS停止后直接切换到监听状态
             } else {
-                DeviceState::Idle       // 如果没有启用持续监听，则切换到空闲状态
+                DeviceState::Idle // 如果没有启用持续监听，则切换到空闲状态
             };
 
             *state_guard = next_state;
@@ -368,7 +392,7 @@ impl Client {
             if next_state == DeviceState::Listening {
                 tracing::info!("🎤 TTS播放完成，自动切换到监听状态");
                 drop(state_guard); // 释放锁
-                
+
                 // 实际启动监听功能，使用 AlwaysOn 模式保持持续监听
                 if let Err(e) = client.start_listening(ListeningMode::AlwaysOn).await {
                     tracing::error!("TTS停止后自动启动监听失败: {}", e);
@@ -436,7 +460,10 @@ impl Client {
         } else {
             println!("⚠️ 未找到AI表情 (emotion字段)");
             // 调试输出完整数据以便检查
-            println!("🔍 AI表情完整数据: {}", serde_json::to_string_pretty(&data).unwrap_or_default());
+            println!(
+                "🔍 AI表情完整数据: {}",
+                serde_json::to_string_pretty(&data).unwrap_or_default()
+            );
         }
     }
 
@@ -458,13 +485,13 @@ impl Client {
             Ok(mcp_message) => {
                 tracing::info!("📥 成功解析MCP消息: {:?}", mcp_message);
                 let mut mcp_protocol = client.mcp_protocol.lock().await;
-                
+
                 // 处理MCP消息并获取响应
                 match mcp_protocol.handle_message(mcp_message).await {
                     Ok(Some(response)) => {
                         // 提取原始请求中的 session_id，并将其包含在响应中
                         let session_id = data.get("session_id").cloned();
-                        
+
                         // 将MCP响应包装在统一的 "信封" 结构中
                         let wrapped_response = serde_json::json!({
                             "type": "mcp",
@@ -475,7 +502,10 @@ impl Client {
                         let response_text = serde_json::to_string(&wrapped_response)?;
                         tracing::debug!("📤 准备发送包装后的MCP响应: {}", response_text);
                         let mut protocol_guard = client.protocol.lock().await;
-                        protocol_guard.send_text(&response_text).await.map_err(|e| ClientError::from(e.to_string()))?;
+                        protocol_guard
+                            .send_text(&response_text)
+                            .await
+                            .map_err(|e| ClientError::from(e.to_string()))?;
                         tracing::info!("📤 MCP响应已发送成功");
                     }
                     Ok(None) => {
@@ -491,7 +521,9 @@ impl Client {
                 tracing::error!("❌ MCP消息解析失败: {}，消息内容: {:?}", e, mcp_data);
                 // 如果不是标准MCP消息，可能是MCP相关的自定义消息
                 tracing::debug!("📄 尝试自定义处理");
-                Self::handle_custom_mcp_message(data, client).await.map_err(|e| ClientError::from(e.to_string()))?;
+                Self::handle_custom_mcp_message(data, client)
+                    .await
+                    .map_err(|e| ClientError::from(e.to_string()))?;
             }
         }
 
@@ -499,14 +531,20 @@ impl Client {
     }
 
     /// 处理自定义MCP消息
-    async fn handle_custom_mcp_message(data: serde_json::Value, _client: &Arc<Client>) -> Result<()> {
+    async fn handle_custom_mcp_message(
+        data: serde_json::Value,
+        _client: &Arc<Client>,
+    ) -> Result<()> {
         // 检查是否是MCP工具调用的响应或通知
         if let Some(method) = data.get("method").and_then(|v| v.as_str()) {
             match method {
                 "mcp/tool_result" => {
                     if let Some(result) = data.get("result") {
                         tracing::info!("🔧 MCP工具执行结果: {:?}", result);
-                        println!("🔧 MCP工具执行结果: {}", serde_json::to_string_pretty(result).unwrap_or_default());
+                        println!(
+                            "🔧 MCP工具执行结果: {}",
+                            serde_json::to_string_pretty(result).unwrap_or_default()
+                        );
                     }
                 }
                 "mcp/notification" => {
@@ -525,7 +563,11 @@ impl Client {
     }
 
     /// 发送MCP工具调用请求
-    pub async fn call_mcp_tool(&self, tool_name: &str, arguments: Option<std::collections::HashMap<String, serde_json::Value>>) -> Result<serde_json::Value> {
+    pub async fn call_mcp_tool(
+        &self,
+        tool_name: &str,
+        arguments: Option<std::collections::HashMap<String, serde_json::Value>>,
+    ) -> Result<serde_json::Value> {
         tracing::info!("🔧 调用MCP工具: {}", tool_name);
 
         let session_id = {
@@ -583,13 +625,13 @@ impl Client {
     fn set_device_state(&self, new_state: DeviceState) {
         let device_state = Arc::clone(&self.device_state);
         let callback = self.on_state_changed.clone();
-        
+
         tokio::spawn(async move {
             let mut state_guard = device_state.lock().await;
             let old_state = *state_guard;
             if old_state != new_state {
                 *state_guard = new_state;
-                
+
                 // 添加表情和状态输出
                 let _status_emoji = match new_state {
                     DeviceState::Idle => "💤",
@@ -598,7 +640,7 @@ impl Client {
                     DeviceState::Listening => "👂",
                     DeviceState::Speaking => "🗣️",
                 };
-               
+
                 // 调用状态变化回调
                 if let Some(callback) = &callback {
                     callback(new_state);
@@ -657,18 +699,28 @@ impl Client {
             let state_guard = self.device_state.lock().await;
             *state_guard
         };
-        
-        tracing::debug!("🔍 开始监听检查: is_recording={}, current_state={:?}, mode={:?}", 
-                       is_currently_recording, current_state, mode);
-        
+
+        tracing::debug!(
+            "🔍 开始监听检查: is_recording={}, current_state={:?}, mode={:?}",
+            is_currently_recording,
+            current_state,
+            mode
+        );
+
         // 如果已有录音在运行，则先停止，确保状态干净
         if is_currently_recording {
-            tracing::info!("🛑 检测到已有录音，先停止旧的录音以确保状态干净 (state={:?})", current_state);
+            tracing::info!(
+                "🛑 检测到已有录音，先停止旧的录音以确保状态干净 (state={:?})",
+                current_state
+            );
             self.stop_microphone_recording().await;
-            
+
             // 停止后再次检查状态
             let new_recording_state = self.is_recording_from_mic.load(Ordering::Relaxed);
-            tracing::debug!("🔍 停止录音后状态检查: is_recording={}", new_recording_state);
+            tracing::debug!(
+                "🔍 停止录音后状态检查: is_recording={}",
+                new_recording_state
+            );
         }
 
         // println!("🎤 开始监听...");
@@ -682,7 +734,7 @@ impl Client {
             // 重新连接后，需要重新启动事件处理循环
             self.start_event_handling(new_event_receiver);
         }
-        
+
         // 获取 Session ID，如果不存在则使用空字符串
         let session_id = protocol_guard.get_session_id().await.unwrap_or_else(|| {
             tracing::warn!("⚠️ 未获取到Session ID，将使用空字符串");
@@ -736,13 +788,13 @@ impl Client {
 
         println!("🛑 停止监听");
         tracing::info!("🛑 停止监听");
-        
+
         // 停止麦克风录音
         self.stop_microphone_recording().await;
-        
+
         // 设置状态
         self.set_device_state(DeviceState::Idle);
-        
+
         // 关闭音频通道
         {
             let mut protocol_guard = self.protocol.lock().await;
@@ -758,7 +810,9 @@ impl Client {
         let mut recorder = MicrophoneOpusRecorder::new(
             self.config.audio.input_sample_rate,
             self.config.audio.channels,
-            ((self.config.audio.frame_duration as usize) * (self.config.audio.input_sample_rate as usize)) / 1000,
+            ((self.config.audio.frame_duration as usize)
+                * (self.config.audio.input_sample_rate as usize))
+                / 1000,
         )?;
 
         // 检查设备状态
@@ -781,13 +835,13 @@ impl Client {
         // 启动音频数据处理任务
         let protocol = Arc::clone(&self.protocol);
         let is_recording = Arc::clone(&self.is_recording_from_mic);
-        
+
         tokio::spawn(async move {
             let mut receiver = opus_receiver;
-            
+
             // 添加任务开始日志
             tracing::debug!("🎤 音频数据处理任务开始");
-            
+
             while let Some(opus_data) = receiver.recv().await {
                 if !is_recording.load(Ordering::Relaxed) {
                     tracing::debug!("🎤 检测到录音停止标志，退出音频处理任务");
@@ -810,7 +864,7 @@ impl Client {
                     tracing::debug!("🎤 音频通道未开启，跳过发送音频数据");
                 }
             }
-            
+
             // 任务结束时确保录音状态被重置
             is_recording.store(false, Ordering::Relaxed);
             tracing::debug!("🎤 音频数据处理任务结束，录音状态已重置为false");
@@ -822,11 +876,11 @@ impl Client {
     /// 停止麦克风录音
     async fn stop_microphone_recording(&self) {
         let was_recording = self.is_recording_from_mic.load(Ordering::Relaxed);
-        
+
         // 立即设置录音状态为false，防止新的音频数据被处理
         self.is_recording_from_mic.store(false, Ordering::Relaxed);
         tracing::debug!("🎤 录音状态已立即设置为false");
-        
+
         let mut recorder_guard = self.recorder.lock().await;
         if let Some(ref mut recorder) = recorder_guard.as_mut() {
             tracing::debug!("🎤 正在停止录音器...");
@@ -836,23 +890,23 @@ impl Client {
             tracing::debug!("🎤 录音器已为None，无需停止");
         }
         *recorder_guard = None;
-        
+
         // 给音频数据处理任务一些时间来响应停止信号
         tokio::time::sleep(Duration::from_millis(50)).await;
-        
+
         tracing::info!("🎤 麦克风录音已停止，状态标志从{}变为false", was_recording);
     }
 
     /// 停止语音聊天
     pub async fn stop_voice_chat(&self) -> Result<()> {
         tracing::info!("🛑 停止语音聊天...");
-        
+
         self.keep_listening.store(false, Ordering::Relaxed);
-        
+
         if let Err(e) = self.stop_listening().await {
             tracing::warn!("停止监听时出错: {}", e);
         }
-        
+
         Ok(())
     }
 
@@ -872,21 +926,21 @@ impl Client {
     /// 断开连接
     pub async fn disconnect(&self) -> Result<()> {
         tracing::info!("🔌 断开连接...");
-        
+
         // 停止语音聊天
         if let Err(e) = self.stop_voice_chat().await {
             tracing::warn!("停止语音聊天失败: {}", e);
         }
-        
+
         // 关闭协议连接
         {
             let mut protocol_guard = self.protocol.lock().await;
             protocol_guard.destroy();
         }
-        
+
         // 设置空闲状态
         self.set_device_state(DeviceState::Idle);
-        
+
         tracing::info!("✅ 连接已断开");
         Ok(())
     }

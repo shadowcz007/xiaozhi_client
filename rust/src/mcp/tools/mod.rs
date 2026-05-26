@@ -1,5 +1,5 @@
-pub mod wifi;
-pub mod registry;
 pub mod plugin_manager;
+pub mod registry;
+pub mod wifi;
 
-pub use registry::{initialize_tools, handle_tools_call}; 
+pub use registry::{handle_tools_call, initialize_tools};

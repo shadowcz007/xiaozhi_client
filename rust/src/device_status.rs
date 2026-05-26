@@ -1,4 +1,4 @@
-use crate::types::{DeviceStatusResponse, Result, ClientError};
+use crate::types::{ClientError, DeviceStatusResponse, Result};
 use reqwest::Client as HttpClient;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -48,18 +48,22 @@ impl DeviceStatusChecker {
     }
 
     /// 检查设备状态
-    /// 
+    ///
     /// # Arguments
     /// * `device_id` - 设备ID
-    /// 
+    ///
     /// # Returns
     /// * `Ok(DeviceStatusResult::Activated(response))` - 设备已激活，返回配置信息
     /// * `Ok(DeviceStatusResult::NeedsActivation(info))` - 设备需要激活，返回激活信息
     /// * `Ok(DeviceStatusResult::NeedsActivationNoInfo)` - 设备需要激活，但无详细信息
     /// * `Err(error)` - 检查失败
-    pub async fn check_device_status(&self, device_id: &str, name: &str) -> Result<DeviceStatusResult> {
+    pub async fn check_device_status(
+        &self,
+        device_id: &str,
+        name: &str,
+    ) -> Result<DeviceStatusResult> {
         let client_id = Uuid::new_v4().to_string();
-        
+
         // 准备请求头
         let mut headers = HashMap::new();
         headers.insert("Activation-Version", "2");
@@ -72,12 +76,14 @@ impl DeviceStatusChecker {
         // 准备请求数据
         let payload = json!({});
 
-        tracing::debug!("检查设备状态: device_id={}, client_id={}", device_id, client_id);
+        tracing::debug!(
+            "检查设备状态: device_id={}, client_id={}",
+            device_id,
+            client_id
+        );
 
         // 构建HTTP请求
-        let mut request = self.client
-            .post(&self.ota_url)
-            .json(&payload);
+        let mut request = self.client.post(&self.ota_url).json(&payload);
 
         // 添加请求头
         for (key, value) in headers {
@@ -89,7 +95,7 @@ impl DeviceStatusChecker {
 
         if !response.status().is_success() {
             return Err(ClientError::NetworkError(reqwest::Error::from(
-                response.error_for_status().unwrap_err()
+                response.error_for_status().unwrap_err(),
             )));
         }
 
@@ -104,19 +110,22 @@ impl DeviceStatusChecker {
             if activation.is_object() {
                 tracing::info!("设备需要激活");
                 println!("📝 检测到激活信息对象，设备需要激活");
-                
+
                 // 尝试获取激活相关的详细信息
                 let challenge = activation.get("challenge").and_then(|v| v.as_str());
                 let code = activation.get("code").and_then(|v| v.as_str());
                 let message = activation.get("message").and_then(|v| v.as_str());
-                
+
                 return Ok(DeviceStatusResult::NeedsActivation(ActivationInfo {
                     device_id: device_id.to_string(),
                     device_name: name.to_string(),
                     challenge: challenge.map(|s| s.to_string()),
                     activation_code: code.map(|s| s.to_string()),
                     activation_message: message.map(|s| s.to_string()),
-                    server_message: result.get("message").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    server_message: result
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
                     server_code: result.get("code").and_then(|v| v.as_i64()),
                 }));
             } else if let Some(activation_bool) = activation.as_bool() {
@@ -124,7 +133,7 @@ impl DeviceStatusChecker {
                 if activation_bool {
                     tracing::info!("设备需要激活");
                     println!("📝 检测到 activation: true，设备需要激活");
-                    
+
                     return Ok(DeviceStatusResult::NeedsActivationNoInfo);
                 }
             }
@@ -163,22 +172,25 @@ impl DeviceStatusChecker {
             // 响应不包含完整的配置信息，说明设备需要激活
             tracing::info!("设备需要激活（响应不包含完整配置信息）");
             println!("❌ 响应不包含完整配置信息，设备需要激活");
-            
+
             // 尝试获取服务器返回的错误信息
-            let server_message = result.get("message").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let server_message = result
+                .get("message")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             let server_code = result.get("code").and_then(|v| v.as_i64());
-            
+
             // 检查是否有激活相关的信息
             let activation_info = if let Some(activation_data) = result.get("activation") {
                 let challenge = activation_data.get("challenge").and_then(|v| v.as_str());
                 let code = activation_data.get("code").and_then(|v| v.as_str());
                 let message = activation_data.get("message").and_then(|v| v.as_str());
-                
+
                 Some((challenge, code, message))
             } else {
                 None
             };
-            
+
             if let Some((challenge, code, message)) = activation_info {
                 return Ok(DeviceStatusResult::NeedsActivation(ActivationInfo {
                     device_id: device_id.to_string(),
@@ -190,7 +202,7 @@ impl DeviceStatusChecker {
                     server_code,
                 }));
             }
-            
+
             Ok(DeviceStatusResult::NeedsActivationNoInfo)
         }
     }
@@ -199,6 +211,106 @@ impl DeviceStatusChecker {
 impl Default for DeviceStatusChecker {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+pub enum ActivationResult {
+    Success,
+    WaitingForCode { remaining_retries: u32 },
+    Failed(String),
+}
+
+impl DeviceStatusChecker {
+    pub async fn activate(
+        &self,
+        challenge: &str,
+        device_id: &str,
+        serial_number: &str,
+        hmac_signature: &str,
+    ) -> std::result::Result<ActivationResult, ClientError> {
+        let activate_url = self.ota_url.trim_end_matches('/').to_string() + "/activate";
+
+        let payload = serde_json::json!({
+            "payload": {
+                "algorithm": "hmac-sha256",
+                "serial_number": serial_number,
+                "challenge": challenge,
+                "hmac": hmac_signature
+            }
+        });
+
+        let client_id = Uuid::new_v4().to_string();
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("Activation-Version", "2");
+        headers.insert("Device-Id", device_id);
+        headers.insert("Client-Id", &client_id);
+        headers.insert("Content-Type", "application/json");
+
+        let mut request = self.client.post(&activate_url).json(&payload);
+
+        for (key, value) in headers {
+            request = request.header(key, value);
+        }
+
+        let response = request.send().await?;
+
+        let status = response.status();
+        let body: serde_json::Value = response.json().await.unwrap_or(serde_json::Value::Null);
+
+        if status.as_u16() == 200 {
+            Ok(ActivationResult::Success)
+        } else if status.as_u16() == 202 {
+            Ok(ActivationResult::WaitingForCode {
+                remaining_retries: 0,
+            })
+        } else {
+            let error_msg = body
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown error")
+                .to_string();
+            Ok(ActivationResult::Failed(error_msg))
+        }
+    }
+
+    pub async fn activate_with_retry(
+        &self,
+        challenge: &str,
+        device_id: &str,
+        serial_number: &str,
+        hmac_signature: &str,
+        max_retries: u32,
+        retry_interval_ms: u64,
+    ) -> std::result::Result<ActivationResult, ClientError> {
+        let mut remaining = max_retries;
+
+        loop {
+            let result = self
+                .activate(challenge, device_id, serial_number, hmac_signature)
+                .await?;
+
+            match result {
+                ActivationResult::Success => return Ok(ActivationResult::Success),
+                ActivationResult::WaitingForCode { .. } => {
+                    remaining -= 1;
+                    if remaining == 0 {
+                        return Ok(ActivationResult::Failed(
+                            "达到最大重试次数，用户未在网站完成验证".to_string(),
+                        ));
+                    }
+                    tokio::time::sleep(tokio::time::Duration::from_millis(retry_interval_ms)).await;
+                }
+                ActivationResult::Failed(msg) => {
+                    if msg.contains("Device not found") && remaining > 1 {
+                        remaining -= 1;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(retry_interval_ms))
+                            .await;
+                    } else {
+                        return Ok(ActivationResult::Failed(msg));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -218,4 +330,4 @@ mod tests {
         let checker = DeviceStatusChecker::with_ota_url(custom_url.to_string());
         assert_eq!(checker.ota_url, custom_url);
     }
-} 
+}

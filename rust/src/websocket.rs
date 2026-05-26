@@ -1,14 +1,17 @@
-use tokio_tungstenite::{connect_async_with_config, tungstenite::{Message, client::IntoClientRequest}};
 use futures::{SinkExt, StreamExt};
+use tokio_tungstenite::{
+    connect_async_with_config,
+    tungstenite::{client::IntoClientRequest, Message},
+};
 
-use std::time::Duration;
-use tokio::time::timeout;
-use tokio::sync::{mpsc, Mutex};
-use std::sync::Arc;
-use uuid::Uuid;
-use crate::types::{Result, ClientError};
 use crate::config::Config;
+use crate::types::{ClientError, Result};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::{mpsc, Mutex};
+use tokio::time::timeout;
+use uuid::Uuid;
 
 /// WebSocket事件类型
 #[derive(Debug, Clone)]
@@ -49,7 +52,7 @@ impl WebSocketProtocol {
     }
 
     /// 连接到WebSocket服务器
-    /// 
+    ///
     /// # Returns
     /// * `mpsc::UnboundedReceiver<WebSocketEvent>` - 事件接收器
     pub async fn connect(&mut self) -> Result<mpsc::UnboundedReceiver<WebSocketEvent>> {
@@ -72,21 +75,31 @@ impl WebSocketProtocol {
         // 创建WebSocket请求并设置自定义头部
         let mut request = self.config.websocket_url.clone().into_client_request()?;
         let headers = request.headers_mut();
-        
+
         // 设置自定义头部
-        headers.insert("Authorization", format!("Bearer {}", self.config.access_token).parse().unwrap());
+        headers.insert(
+            "Authorization",
+            format!("Bearer {}", self.config.access_token)
+                .parse()
+                .unwrap(),
+        );
         headers.insert("Protocol-Version", "1".parse().unwrap());
         headers.insert("Device-Id", self.config.device_id.parse().unwrap());
         headers.insert("Client-Id", self.config.client_id.parse().unwrap());
 
-        tracing::info!("[调试] WebSocket请求头: Authorization=Bearer {}, Device-Id={}, Client-Id={}", 
-            self.config.access_token, self.config.device_id, self.config.client_id);
+        tracing::info!(
+            "[调试] WebSocket请求头: Authorization=Bearer {}, Device-Id={}, Client-Id={}",
+            self.config.access_token,
+            self.config.device_id,
+            self.config.client_id
+        );
 
         // 建立WebSocket连接
         let connection_result = timeout(
             Duration::from_millis(self.config.connect_timeout),
-            connect_async_with_config(request, None, false)
-        ).await;
+            connect_async_with_config(request, None, false),
+        )
+        .await;
 
         let (ws_stream, _response) = match connection_result {
             Ok(Ok((stream, response))) => {
@@ -119,7 +132,8 @@ impl WebSocketProtocol {
             while let Some(message) = write_receiver.recv().await {
                 if let Err(e) = write.send(message).await {
                     tracing::error!("发送消息失败: {}", e);
-                    let _ = write_event_sender.send(WebSocketEvent::NetworkError(format!("发送失败: {}", e)));
+                    let _ = write_event_sender
+                        .send(WebSocketEvent::NetworkError(format!("发送失败: {}", e)));
                     break;
                 }
             }
@@ -128,7 +142,7 @@ impl WebSocketProtocol {
         // 发送Hello消息
         let hello_message = self.create_hello_message();
         let hello_text = serde_json::to_string(&hello_message)?;
-        
+
         if let Err(e) = write_sender.send(Message::Text(hello_text)) {
             let error_msg = format!("发送Hello消息失败: {}", e);
             tracing::error!("{}", error_msg);
@@ -139,7 +153,10 @@ impl WebSocketProtocol {
         tracing::debug!("已发送Hello消息");
 
         // 添加调试输出看看实际发送的内容
-        tracing::info!("[调试] 发送的Hello消息: {}", serde_json::to_string_pretty(&hello_message)?);
+        tracing::info!(
+            "[调试] 发送的Hello消息: {}",
+            serde_json::to_string_pretty(&hello_message)?
+        );
 
         // 启动消息处理任务
         let event_sender_clone = event_sender.clone();
@@ -149,14 +166,22 @@ impl WebSocketProtocol {
 
         let _read_task = tokio::spawn(async move {
             let mut read = read;
-            
+
             while let Some(message) = read.next().await {
                 match message {
                     Ok(Message::Text(text)) => {
                         tracing::debug!("收到文本消息: {}", text);
-                        if let Err(e) = Self::handle_text_message(&text, &event_sender_clone, &hello_received_clone, &session_id_clone).await {
+                        if let Err(e) = Self::handle_text_message(
+                            &text,
+                            &event_sender_clone,
+                            &hello_received_clone,
+                            &session_id_clone,
+                        )
+                        .await
+                        {
                             tracing::error!("处理文本消息失败: {}", e);
-                            let _ = event_sender_clone.send(WebSocketEvent::NetworkError(format!("消息处理错误: {}", e)));
+                            let _ = event_sender_clone
+                                .send(WebSocketEvent::NetworkError(format!("消息处理错误: {}", e)));
                         }
                     }
                     Ok(Message::Binary(data)) => {
@@ -177,7 +202,8 @@ impl WebSocketProtocol {
                     }
                     Err(e) => {
                         tracing::error!("WebSocket读取错误: {}", e);
-                        let _ = event_sender_clone.send(WebSocketEvent::NetworkError(format!("连接错误: {}", e)));
+                        let _ = event_sender_clone
+                            .send(WebSocketEvent::NetworkError(format!("连接错误: {}", e)));
                         break;
                     }
                 }
@@ -189,8 +215,9 @@ impl WebSocketProtocol {
         // 等待Hello响应
         let hello_timeout = timeout(
             Duration::from_millis(self.config.connect_timeout),
-            self.wait_for_hello()
-        ).await;
+            self.wait_for_hello(),
+        )
+        .await;
 
         match hello_timeout {
             Ok(Ok(_session_id)) => {
@@ -211,7 +238,7 @@ impl WebSocketProtocol {
                 return Err(ClientError::ConnectionTimeout);
             }
         }
-        
+
         Ok(event_receiver)
     }
 
@@ -220,13 +247,13 @@ impl WebSocketProtocol {
         // 等待Hello响应处理完成
         let start_time = std::time::Instant::now();
         let timeout_duration = Duration::from_millis(self.config.connect_timeout);
-        
+
         while start_time.elapsed() < timeout_duration {
             let hello_received = {
                 let hello_guard = self.hello_received.lock().await;
                 *hello_guard
             };
-            
+
             if hello_received {
                 let session_guard = self.session_id.lock().await;
                 if let Some(session_id) = session_guard.as_ref() {
@@ -235,10 +262,13 @@ impl WebSocketProtocol {
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        
+
         // 如果超时但没有获取到session_id，生成一个默认的
         let default_session_id = format!("session_{}", chrono::Utc::now().timestamp());
-        tracing::warn!("⚠️ 未收到服务器session_id，使用默认值: {}", default_session_id);
+        tracing::warn!(
+            "⚠️ 未收到服务器session_id，使用默认值: {}",
+            default_session_id
+        );
         Ok(default_session_id)
     }
 
@@ -263,13 +293,13 @@ impl WebSocketProtocol {
 
     /// 处理文本消息
     async fn handle_text_message(
-        text: &str, 
+        text: &str,
         event_sender: &mpsc::UnboundedSender<WebSocketEvent>,
         hello_received: &Arc<Mutex<bool>>,
-        session_id_storage: &Arc<Mutex<Option<String>>>
+        session_id_storage: &Arc<Mutex<Option<String>>>,
     ) -> Result<()> {
         tracing::debug!("开始处理文本消息: {}", text);
-        
+
         let json_data: serde_json::Value = match serde_json::from_str(text) {
             Ok(data) => {
                 tracing::debug!("JSON解析成功: {:?}", data);
@@ -280,7 +310,7 @@ impl WebSocketProtocol {
                 return Err(ClientError::JsonError(e));
             }
         };
-        
+
         // 检查是否是Hello响应
         if let Some(msg_type) = json_data.get("type") {
             tracing::debug!("消息类型字段存在，值为: {:?}", msg_type);
@@ -288,20 +318,20 @@ impl WebSocketProtocol {
                 tracing::debug!("消息类型为字符串: {}", type_str);
                 if type_str == "hello" {
                     tracing::info!("✨ 收到Hello响应，准备打开音频通道");
-                    
+
                     // 提取session_id
                     if let Some(session_id) = json_data.get("session_id").and_then(|v| v.as_str()) {
                         let mut session_guard = session_id_storage.lock().await;
                         *session_guard = Some(session_id.to_string());
                         tracing::info!("🆔 获取到Session ID: {}", session_id);
                     }
-                    
+
                     // 设置hello_received标志
                     {
                         let mut hello_guard = hello_received.lock().await;
                         *hello_guard = true;
                     }
-                    
+
                     let _ = event_sender.send(WebSocketEvent::AudioChannelOpened);
                 }
             } else {
@@ -330,7 +360,7 @@ impl WebSocketProtocol {
         } else {
             return Err(ClientError::invalid_state("写入通道未建立"));
         }
-        
+
         Ok(())
     }
 
@@ -348,7 +378,7 @@ impl WebSocketProtocol {
         } else {
             return Err(ClientError::invalid_state("写入通道未建立"));
         }
-        
+
         Ok(())
     }
 
@@ -391,7 +421,7 @@ impl WebSocketProtocol {
         if let Some(event_sender) = &self.event_sender {
             let _ = event_sender.send(WebSocketEvent::AudioChannelClosed);
         }
-        
+
         self.connected.store(false, Ordering::Relaxed);
         {
             let mut hello_guard = self.hello_received.lock().await;
@@ -401,7 +431,7 @@ impl WebSocketProtocol {
             let mut session_guard = self.session_id.lock().await;
             *session_guard = None;
         }
-        
+
         tracing::info!("🔇 音频通道已关闭");
         Ok(())
     }
@@ -428,7 +458,8 @@ pub fn generate_device_id() -> String {
 /// 生成客户端ID
 pub fn generate_client_id() -> String {
     let uuid_str = Uuid::new_v4().simple().to_string();
-    format!("client_{}_{}", 
+    format!(
+        "client_{}_{}",
         chrono::Utc::now().timestamp(),
         &uuid_str[..9]
     )
@@ -442,7 +473,7 @@ mod tests {
     fn test_generate_ids() {
         let device_id = generate_device_id();
         let client_id = generate_client_id();
-        
+
         assert!(!device_id.is_empty());
         assert!(!client_id.is_empty());
         assert!(client_id.starts_with("client_"));
@@ -452,9 +483,9 @@ mod tests {
     async fn test_websocket_protocol_creation() {
         let config = Config::default();
         let protocol = WebSocketProtocol::new(config);
-        
+
         assert!(!protocol.connected.load(Ordering::Relaxed));
         assert!(!protocol.is_audio_channel_open().await);
         assert!(protocol.get_session_id().await.is_none());
     }
-} 
+}

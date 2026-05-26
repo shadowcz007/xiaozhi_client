@@ -22,7 +22,12 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(websocket_url: String, access_token: String, device_id: String, client_id: String) -> Self {
+    pub fn new(
+        websocket_url: String,
+        access_token: String,
+        device_id: String,
+        client_id: String,
+    ) -> Self {
         Self {
             websocket_url,
             access_token,
@@ -69,4 +74,4 @@ impl Default for Config {
             max_reconnect_attempts: 3,
         }
     }
-} 
+}

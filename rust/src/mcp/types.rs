@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 /// MCP协议版本
 pub const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
@@ -18,23 +18,16 @@ pub enum MCPMessage {
         params: InitializeParams,
     },
     #[serde(rename = "initialized")]
-    Initialized {
-        id: Value,
-    },
+    Initialized { id: Value },
     #[serde(rename = "notifications/initialized")]
-    NotificationsInitialized {
-        jsonrpc: Option<String>,
-    },
+    NotificationsInitialized { jsonrpc: Option<String> },
     #[serde(rename = "tools/list")]
     ToolsList {
         id: Value,
         params: Option<ToolsListParams>,
     },
     #[serde(rename = "tools/call")]
-    ToolsCall {
-        id: Value,
-        params: ToolsCallParams,
-    },
+    ToolsCall { id: Value, params: ToolsCallParams },
     #[serde(rename = "resources/list")]
     ResourcesList {
         id: Value,
@@ -46,9 +39,7 @@ pub enum MCPMessage {
         params: ResourcesReadParams,
     },
     #[serde(rename = "notifications/progress")]
-    NotificationsProgress {
-        params: ProgressNotification,
-    },
+    NotificationsProgress { params: ProgressNotification },
     #[serde(rename = "notifications/cancelled")]
     NotificationsCancelled {
         id: String,
@@ -56,9 +47,7 @@ pub enum MCPMessage {
         params: CancelledNotification,
     },
     #[serde(rename = "logging/message")]
-    LoggingMessage {
-        params: LoggingMessage,
-    },
+    LoggingMessage { params: LoggingMessage },
 }
 
 /// MCP响应消息
@@ -245,4 +234,4 @@ pub enum LogLevel {
     Critical,
     Alert,
     Emergency,
-} 
+}

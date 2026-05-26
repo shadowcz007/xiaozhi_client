@@ -1,213 +1,462 @@
-use xiaozhi_client::{
-    init_logging, DeviceStatusChecker, DeviceStatusResult, Client, Config, StdioController
-};
-use std::io::Write;
-use std::sync::Arc;
-use std::process;
 use clap::{Arg, Command};
+use std::process;
+use std::sync::Arc;
+use xiaozhi_client::{
+    init_logging, ActivationResult, Client, Config, Device, DeviceFingerprint, DeviceManager,
+    DeviceStatusChecker, DeviceStatusResult, StdioController,
+};
+use xiaozhi_client::ui::InteractiveMenu;
 
-mod crypto;
-use crypto::LicenseVerifier;
-
-// 交互模式的实现
 #[allow(dead_code)]
-async fn interactive_mode(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
-    println!("🚀 启动交互模式...");
-    println!("💡 提示:");
-    println!("   - 输入 'start' 开始语音对话");
-    println!("   - 输入 'stop' 停止语音对话");
-    println!("   - 输入 'quit' 或 'exit' 退出程序");
-    println!("");
+async fn activate_device(device: &Device, checker: &DeviceStatusChecker, menu: &InteractiveMenu) -> Result<bool, String> {
+    menu.loading("正在检查设备状态...");
 
-    // 自动启动语音对话
-    println!("🎙️ 自动启动语音对话...");
-    client.start_voice_chat(Some("我是shadow，很高兴见到你")).await?;
+    let status = checker
+        .check_device_status(&device.device_id, &device.device_name)
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let mut input = String::new();
+    match status {
+        DeviceStatusResult::Activated(_) => {
+            println!("\r");
+            menu.success("设备已激活");
+            return Ok(true);
+        }
+        DeviceStatusResult::NeedsActivation(info) => {
+            if let (Some(challenge), Some(code), Some(message)) = (
+                &info.challenge,
+                &info.activation_code,
+                &info.activation_message,
+            ) {
+                menu.activation_code(code, message, "https://xiaozhi.me");
+
+                let hmac_signature = device.hmac_key.clone();
+
+                menu.loading("等待激活...");
+
+                match checker
+                    .activate_with_retry(
+                        challenge,
+                        &device.device_id,
+                        &device.serial_number,
+                        &hmac_signature,
+                        60,
+                        5000,
+                    )
+                    .await
+                {
+                    Ok(ActivationResult::Success) => {
+                        println!("\r");
+                        menu.success("设备激活成功!");
+                        Ok(true)
+                    }
+                    Ok(ActivationResult::WaitingForCode { .. }) => {
+                        println!("\r");
+                        menu.success("激活验证完成!");
+                        Ok(true)
+                    }
+                    Ok(ActivationResult::Failed(msg)) => {
+                        println!("\r");
+                        Err(format!("激活失败: {}", msg))
+                    }
+                    Err(e) => {
+                        println!("\r");
+                        Err(format!("激活请求失败: {}", e))
+                    }
+                }
+            } else {
+                Err("激活信息不完整".to_string())
+            }
+        }
+        DeviceStatusResult::NeedsActivationNoInfo => Err("服务器未返回激活信息".to_string()),
+    }
+}
+
+async fn run_device_manager() -> Result<(), Box<dyn std::error::Error>> {
+    let mut manager = DeviceManager::new();
+    let checker = DeviceStatusChecker::new();
+    let menu = InteractiveMenu::new();
+
     loop {
-        print!("> ");
-        std::io::stdout().flush()?;
-        
-        input.clear();
-        std::io::stdin().read_line(&mut input)?;
-        
-        let command = input.trim().to_lowercase();
-        
-        match command.as_str() {
-            "start" => {
-                println!("🎙️ 开始语音对话...");
-                client.start_voice_chat(None).await?;
+        menu.clear_screen();
+        menu.header("小智设备管理");
+        menu.menu_item("1", "列出所有设备", "查看已注册设备列表");
+        menu.menu_item("2", "创建虚拟设备", "创建新的虚拟设备");
+        menu.menu_item("3", "切换当前设备", "设置默认启动设备");
+        menu.menu_item("4", "激活指定设备", "完成设备激活流程");
+        menu.menu_item("5", "查看设备详情", "查看设备详细信息");
+        menu.menu_item("6", "删除设备", "删除设备");
+        menu.menu_item("7", "启动当前设备", "使用当前设备启动语音助手");
+        menu.menu_item("0", "退出", "退出程序");
+        menu.footer();
+
+        let choice = menu.prompt("请选择操作");
+
+        match choice.as_str() {
+            "1" => {
+                menu.section("设备列表");
+                let devices = manager.list_devices();
+                let current_id = manager.current_device_id();
+
+                if devices.is_empty() {
+                    menu.warning("暂无注册设备");
+                } else {
+                    for (i, device) in devices.iter().enumerate() {
+                        let is_current = Some(device.device_id.as_str()) == current_id;
+                        menu.device_list_item(
+                            i + 1,
+                            &device.device_name,
+                            &device.device_id,
+                            device.activated,
+                            is_current,
+                        );
+                    }
+                }
+                menu.prompt("");
             }
-            "stop" => {
-                println!("🛑 停止语音对话...");
-                client.stop_voice_chat().await?;
+            "2" => {
+                menu.section("创建虚拟设备");
+                let name = menu.prompt_with_default("设备名称", "");
+                menu.loading("正在创建设备...");
+
+                match manager.create_virtual_device(if name.is_empty() { None } else { Some(name) }) {
+                    Ok(device) => {
+                        menu.loading_end(
+                            true,
+                            &format!("虚拟设备创建成功: {}", device.device_name),
+                        );
+                        menu.info(&format!("设备ID: {}", device.device_id));
+                        if let Some(ref mac) = device.virtual_mac {
+                            menu.info(&format!("虚拟MAC: {}", mac));
+                        }
+                    }
+                    Err(e) => {
+                        menu.loading_end(false, "创建设备失败");
+                        menu.error(&e);
+                    }
+                }
+                menu.prompt("");
             }
-            "quit" | "exit" => {
-                println!("👋 正在退出...");
-                client.stop_voice_chat().await?;
-                client.disconnect().await?;
+            "3" => {
+                menu.section("切换当前设备");
+                let devices = manager.list_devices();
+
+                if devices.is_empty() {
+                    menu.warning("暂无设备");
+                } else {
+                    for (i, device) in devices.iter().enumerate() {
+                        menu.device_list_item(
+                            i + 1,
+                            &device.device_name,
+                            &device.device_id,
+                            device.activated,
+                            false,
+                        );
+                    }
+                    menu.footer();
+
+                    let num_str = menu.prompt("输入要切换的设备编号");
+                    let num: usize = match num_str.trim().parse() {
+                        Ok(n) => n,
+                        Err(_) => {
+                            menu.error("无效输入");
+                            menu.prompt("");
+                            continue;
+                        }
+                    };
+
+                    if num < 1 || num > devices.len() {
+                        menu.error("无效编号");
+                    } else {
+                        let device = devices[num - 1];
+                        let device_id = device.device_id.clone();
+                        let device_name = device.device_name.clone();
+                        match manager.set_current_device(&device_id) {
+                            Ok(_) => menu.success(&format!("已切换到: {}", device_name)),
+                            Err(e) => menu.error(&e),
+                        }
+                    }
+                }
+                menu.prompt("");
+            }
+            "4" => {
+                menu.section("激活设备");
+                let devices = manager.list_devices();
+
+                if devices.is_empty() {
+                    menu.warning("暂无设备");
+                } else {
+                    let unactivated: Vec<_> = devices
+                        .iter()
+                        .filter(|d| !d.activated)
+                        .collect();
+
+                    if unactivated.is_empty() {
+                        menu.info("所有设备都已激活");
+                    } else {
+                        menu.info("可激活的设备:");
+                        for (i, device) in unactivated.iter().enumerate() {
+                            menu.device_list_item(
+                                i + 1,
+                                &device.device_name,
+                                &device.device_id,
+                                device.activated,
+                                false,
+                            );
+                        }
+                        menu.footer();
+
+                        let num_str = menu.prompt("输入要激活的设备编号");
+                        let num: usize = match num_str.trim().parse() {
+                            Ok(n) => n,
+                            Err(_) => {
+                                menu.error("无效输入");
+                                menu.prompt("");
+                                continue;
+                            }
+                        };
+
+                        if num < 1 || num > unactivated.len() {
+                            menu.error("无效编号");
+                        } else {
+                            let device = unactivated[num - 1].clone();
+                            let device_id = device.device_id.clone();
+                            let result = activate_device(&device, &checker, &menu).await;
+                            match result {
+                                Ok(true) => {
+                                    manager.set_activation_status(&device_id, true).ok();
+                                }
+                                Ok(false) => {}
+                                Err(e) => menu.error(&e),
+                            }
+                            manager = DeviceManager::new();
+                        }
+                    }
+                }
+                menu.prompt("");
+            }
+            "5" => {
+                menu.section("设备详情");
+                let devices = manager.list_devices();
+
+                if devices.is_empty() {
+                    menu.warning("暂无设备");
+                } else {
+                    for (i, device) in devices.iter().enumerate() {
+                        menu.device_list_item(
+                            i + 1,
+                            &device.device_name,
+                            &device.device_id,
+                            device.activated,
+                            false,
+                        );
+                    }
+                    menu.footer();
+
+                    let num_str = menu.prompt("输入要查看的设备编号");
+                    let num: usize = match num_str.trim().parse() {
+                        Ok(n) => n,
+                        Err(_) => {
+                            menu.error("无效输入");
+                            menu.prompt("");
+                            continue;
+                        }
+                    };
+
+                    if num < 1 || num > devices.len() {
+                        menu.error("无效编号");
+                    } else {
+                        let device = devices[num - 1];
+                        menu.section(&device.device_name);
+                        menu.device_detail("", "设备ID", &device.device_id);
+                        menu.device_detail("", "序列号", &device.serial_number);
+                        menu.device_detail("", "类型", if device.is_virtual { "虚拟设备" } else { "物理设备" });
+                        menu.device_detail("", "激活状态", if device.activated { "已激活" } else { "未激活" });
+                        if let Some(ref mac) = device.virtual_mac {
+                            menu.device_detail("", "虚拟MAC", mac);
+                        }
+                        if let Some(ref at) = device.activated_at {
+                            menu.device_detail("", "激活时间", at);
+                        }
+                    }
+                }
+                menu.prompt("");
+            }
+            "6" => {
+                menu.section("删除设备");
+                let devices = manager.list_devices();
+
+                if devices.is_empty() {
+                    menu.warning("暂无设备");
+                } else {
+                    for (i, device) in devices.iter().enumerate() {
+                        menu.device_list_item(
+                            i + 1,
+                            &device.device_name,
+                            &device.device_id,
+                            device.activated,
+                            false,
+                        );
+                    }
+                    menu.footer();
+
+                    let num_str = menu.prompt("输入要删除的设备编号");
+                    let num: usize = match num_str.trim().parse() {
+                        Ok(n) => n,
+                        Err(_) => {
+                            menu.error("无效输入");
+                            menu.prompt("");
+                            continue;
+                        }
+                    };
+
+                    if num < 1 || num > devices.len() {
+                        menu.error("无效编号");
+                    } else {
+                        let device = devices[num - 1];
+                        let device_id = device.device_id.clone();
+                        let device_name = device.device_name.clone();
+                        if menu.confirm(&format!("确认删除设备 {}?", device_name)) {
+                            match manager.delete_device(&device_id) {
+                                Ok(_) => menu.success("设备已删除"),
+                                Err(e) => menu.error(&e),
+                            }
+                        } else {
+                            menu.info("取消删除");
+                        }
+                    }
+                }
+                menu.prompt("");
+            }
+            "7" => {
+                if let Some(current) = manager.get_current_device() {
+                    menu.success(&format!("启动设备: {}", current.device_name));
+                    menu.info(&format!("设备ID: {}", current.device_id));
+                    menu.info("请使用 --device-id 参数启动客户端");
+                    menu.prompt("");
+                } else {
+                    menu.warning("没有当前设备，请先创建并切换");
+                    menu.prompt("");
+                }
+            }
+            "0" | "q" | "quit" => {
+                menu.success("再见!");
                 break;
             }
             _ => {
-                println!("❓ 未知命令，可用命令: start, stop, quit, exit");
+                menu.error("无效选择，请重试");
+                menu.prompt("");
             }
         }
     }
-    
+
     Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 解析命令行参数
     let matches = Command::new("XiaoZhi Client")
         .version("0.1.0")
         .author("shadow")
         .about("小智语音助手客户端")
-        .arg(
-            Arg::new("key")
-                .long("key")
-                .value_name("ENCODED_KEY")
-                .help("Base64 编码的许可证密钥")
-                .required(false)  // 开发环境下不强制要求
-        )
+        .arg(Arg::new("manage").long("manage").action(clap::ArgAction::SetTrue).help("进入设备管理模式"))
+        .arg(Arg::new("activate").long("activate").action(clap::ArgAction::SetTrue).help("激活设备"))
         .arg(
             Arg::new("device-id")
                 .long("device-id")
                 .value_name("DEVICE_ID")
                 .help("设备ID")
-                .default_value("9b:9b:f3:50:dc:17")
+                .default_value("9b:9b:f3:50:dc:17"),
         )
         .arg(
             Arg::new("device-name")
                 .long("device-name")
                 .value_name("DEVICE_NAME")
                 .help("设备名称")
-                .default_value("goodmate")
+                .default_value("goodmate"),
         )
         .get_matches();
 
-    // 在开发环境中使用默认的测试许可证
-    let encoded_key = if cfg!(debug_assertions) {
-        matches.get_one::<String>("key").map(|s| s.as_str()).unwrap_or(
-            "eyJsaWNlbnNlIjoidGVzdC1saWNlbnNlIiwicGFzc3dvcmQiOiJ0ZXN0LXBhc3N3b3JkIn0="
-        )
-    } else {
-        matches.get_one::<String>("key")
-            .map(|s| s.as_str())
-            .ok_or("生产环境需要提供许可证密钥")?
-    };
-
-    // 初始化验证器
-    let verifier = LicenseVerifier::new();
-
-    // 在开发环境中，如果验证器初始化失败，跳过验证
-    if !cfg!(debug_assertions) {
-        // 解码并验证 license
-        let license_key = match LicenseVerifier::decode_license_key(encoded_key) {
-            Ok(key) => key,
-            Err(e) => {
-                eprintln!("❌ 无效的密钥格式: {}", e);
-                eprintln!("💡 请使用正确的 base64 编码格式的许可证密钥");
-                process::exit(1);
-            }
-        };
-
-        match verifier.verify_license(&license_key) {
-            Ok(true) => println!("✅ 许可证验证成功"),
-            Ok(false) => {
-                eprintln!("❌ 无效的许可证");
-                eprintln!("💡 请联系管理员获取有效的许可证");
-                process::exit(1);
-            }
-            Err(e) => {
-                eprintln!("❌ 许可证验证失败: {}", e);
-                process::exit(1);
-            }
-        }
+    if matches.get_flag("manage") {
+        run_device_manager().await?;
+        return Ok(());
     }
 
-    // 初始化日志
+    if matches.get_flag("activate") {
+        let manager = DeviceManager::new();
+        let menu = InteractiveMenu::new();
+
+        if let Some(current) = manager.get_current_device() {
+            let checker = DeviceStatusChecker::new();
+            if let Err(e) = activate_device(current, &checker, &menu).await {
+                eprintln!("激活失败: {}", e);
+                process::exit(1);
+            }
+            menu.success("设备激活成功!");
+        } else {
+            eprintln!("没有当前设备，请先在管理模式下创建设备");
+            process::exit(1);
+        }
+        return Ok(());
+    }
+
     init_logging();
-    
-    // 获取设备ID和设备名称
+
     let device_id = matches.get_one::<String>("device-id").unwrap();
     let device_name = matches.get_one::<String>("device-name").unwrap();
-    
-    println!("🔍 正在检查设备状态...");
-    println!("📱 设备ID: {}", device_id);
-    println!("📝 设备名称: {}", device_name);
-    
-    // 检查设备状态
+
+    println!("正在检查设备状态...");
+    println!("设备ID: {}", device_id);
+    println!("设备名称: {}", device_name);
+
     let checker = DeviceStatusChecker::new();
     let status = checker.check_device_status(&device_id, &device_name).await?;
-    
+
     match status {
         DeviceStatusResult::Activated(status_response) => {
-            // 设备已激活，正常启动
-            println!("✅ 设备已激活，正在初始化客户端...");
-            
-            // 添加调试信息
-            println!("🔍 调试信息:");
-            println!("   - 设备ID: {}", device_id);
-            println!("   - 设备名称: {}", device_name);
-            println!("   - WebSocket URL: {}", status_response.websocket.url);
-            println!("   - WebSocket Token: {}", status_response.websocket.token);
-            println!("   - MQTT Client ID: {}", status_response.mqtt.client_id);
-            println!("   - MQTT Endpoint: {}", status_response.mqtt.endpoint);
-            println!("   - Firmware URL: {}", status_response.firmware.url);
-            println!("   - Firmware Version: {}", status_response.firmware.version);
-            println!("   - Server Time: {}", status_response.server_time.timestamp);
-            println!();
-            
-            // 创建配置
+            println!("设备已激活，正在初始化客户端...");
+
             let config = Config::new(
                 status_response.websocket.url,
                 status_response.websocket.token,
                 device_id.to_string(),
                 status_response.mqtt.client_id,
             );
-            
-            // 创建客户端
+
             let mut client = Client::new(config)?;
-            
-            // 设置状态变化回调
+
             client.set_state_change_callback(|state| {
-                println!("📱 状态变化: {:?}", state);
+                println!("状态变化: {:?}", state);
             });
-            
-            // 将客户端包装在 Arc 中
+
             let client = Arc::new(client);
-            
-            // 创建并启动 stdio 控制器
+
             let controller = StdioController::new(Arc::clone(&client));
-            
-            // 启动异步任务
+
             tokio::spawn(async move {
                 if let Err(e) = controller.start().await {
-                    eprintln!("❌ 控制器启动错误: {:?}", e);
+                    eprintln!("控制器启动错误: {:?}", e);
                 }
             });
-            
-            // 等待程序退出信号
+
             tokio::signal::ctrl_c().await?;
-            println!("\n👋 收到退出信号，正在清理...");
-            
-            // 断开连接
+            println!("\n收到退出信号，正在清理...");
+
             client.disconnect().await?;
         }
-        DeviceStatusResult::NeedsActivation(activation_info) => {
-            // 设备需要激活，显示详细信息
-            println!("❌ 设备需要先激活");
-           
+        DeviceStatusResult::NeedsActivation(_) => {
+            println!("设备需要先激活");
+            println!("提示: 请先运行设备激活程序");
+            println!("   --manage 进入设备管理菜单");
+            println!("   --activate 激活当前设备");
         }
         DeviceStatusResult::NeedsActivationNoInfo => {
-            println!("❌ 设备需要先激活");
-            println!("💡 提示: 请先运行设备激活程序");
+            println!("设备需要先激活");
+            println!("提示: 请先运行设备激活程序");
+            println!("   --manage 进入设备管理菜单");
+            println!("   --activate 激活当前设备");
         }
     }
-    
+
     Ok(())
 }
-
-

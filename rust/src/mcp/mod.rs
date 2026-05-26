@@ -2,12 +2,12 @@ pub mod resources;
 pub mod tools;
 pub mod types;
 
-use std::sync::Weak;
 use serde_json::Value;
+use std::sync::Weak;
 
-use crate::types::Result;
+use self::tools::registry::{handle_tools_call, initialize_tools, ToolSource};
 use self::types::*;
-use self::tools::registry::{initialize_tools, handle_tools_call, ToolSource};
+use crate::types::Result;
 
 /// MCP协议处理器
 pub struct MCPProtocol {
@@ -38,21 +38,22 @@ impl MCPProtocol {
     }
 
     /// 处理MCP消息
-    pub async fn handle_message(&mut self, message: MCPMessage) -> Result<Option<serde_json::Value>> {
+    pub async fn handle_message(
+        &mut self,
+        message: MCPMessage,
+    ) -> Result<Option<serde_json::Value>> {
         match message {
-            MCPMessage::Initialize { id, jsonrpc: _, params } => {
-                self.handle_initialize(id, params).await
-            }
-            MCPMessage::Initialized { id } => {
-                self.handle_initialized(id).await
-            }
+            MCPMessage::Initialize {
+                id,
+                jsonrpc: _,
+                params,
+            } => self.handle_initialize(id, params).await,
+            MCPMessage::Initialized { id } => self.handle_initialized(id).await,
             MCPMessage::NotificationsInitialized { jsonrpc: _ } => {
                 tracing::info!("✅ 收到客户端初始化通知");
                 Ok(None)
             }
-            MCPMessage::ToolsList { id, params } => {
-                self.handle_tools_list(id, params).await
-            }
+            MCPMessage::ToolsList { id, params } => self.handle_tools_list(id, params).await,
             MCPMessage::ToolsCall { id, params } => {
                 handle_tools_call(id, params, &self.tools, &self.client_ref).await
             }
@@ -65,33 +66,44 @@ impl MCPProtocol {
             MCPMessage::NotificationsProgress { params } => {
                 self.handle_progress_notification(params).await
             }
-            MCPMessage::NotificationsCancelled { id: _, jsonrpc: _, params } => {
-                self.handle_cancelled_notification(params).await
-            }
-            MCPMessage::LoggingMessage { params } => {
-                self.handle_logging_message(params).await
-            }
+            MCPMessage::NotificationsCancelled {
+                id: _,
+                jsonrpc: _,
+                params,
+            } => self.handle_cancelled_notification(params).await,
+            MCPMessage::LoggingMessage { params } => self.handle_logging_message(params).await,
         }
     }
 
     /// 处理初始化消息
-    async fn handle_initialize(&mut self, id: Value, params: InitializeParams) -> Result<Option<serde_json::Value>> {
+    async fn handle_initialize(
+        &mut self,
+        id: Value,
+        params: InitializeParams,
+    ) -> Result<Option<serde_json::Value>> {
         tracing::info!("🔧 MCP初始化请求: 协议版本 {}", params.protocol_version);
-        
+
         // 验证协议版本
         if params.protocol_version != MCP_PROTOCOL_VERSION {
-            tracing::warn!("⚠️ 协议版本不匹配: 期望 {}, 收到 {}", MCP_PROTOCOL_VERSION, params.protocol_version);
+            tracing::warn!(
+                "⚠️ 协议版本不匹配: 期望 {}, 收到 {}",
+                MCP_PROTOCOL_VERSION,
+                params.protocol_version
+            );
         }
 
         // 初始化工具列表
         self.tools = initialize_tools();
-        
+
         // 初始化资源列表
         // self.resources = resources::initialize_resources();
-        
+
         // 注意：根据MCP协议标准，initialized状态应该在收到initialized通知后才设置为true
-        tracing::info!("🎯 MCP工具和资源初始化完成，工具数量: {}, 资源数量: {}", 
-                      self.tools.len(), self.resources.len());
+        tracing::info!(
+            "🎯 MCP工具和资源初始化完成，工具数量: {}, 资源数量: {}",
+            self.tools.len(),
+            self.resources.len()
+        );
 
         // 构造标准的JSON-RPC 2.0响应格式
         let response = serde_json::json!({
@@ -125,7 +137,10 @@ impl MCPProtocol {
         self.initialized = true;
         tracing::info!("✅ MCP协议握手完成！客户端已确认初始化");
         tracing::info!("📋 服务器已准备就绪，注册工具数量: {}", self.tools.len());
-        tracing::info!("📋 服务器已准备就绪，注册资源数量: {}", self.resources.len());
+        tracing::info!(
+            "📋 服务器已准备就绪，注册资源数量: {}",
+            self.resources.len()
+        );
         tracing::info!("🎯 现在客户端可以发送tools/list和其他请求了");
 
         // 使用标准JSON-RPC 2.0格式
@@ -139,10 +154,14 @@ impl MCPProtocol {
     }
 
     /// 处理工具列表请求
-    async fn handle_tools_list(&self, id: Value, _params: Option<ToolsListParams>) -> Result<Option<serde_json::Value>> {
+    async fn handle_tools_list(
+        &self,
+        id: Value,
+        _params: Option<ToolsListParams>,
+    ) -> Result<Option<serde_json::Value>> {
         tracing::info!("📋 收到工具列表请求, id: {}", id);
         tracing::debug!("📋 当前可用工具: {:?}", self.tools);
-        
+
         let result = ToolsListResult {
             tools: self.tools.iter().map(|ts| ts.get_tool().clone()).collect(),
             next_cursor: None,
@@ -160,19 +179,28 @@ impl MCPProtocol {
     }
 
     /// 处理进度通知
-    async fn handle_progress_notification(&self, params: ProgressNotification) -> Result<Option<serde_json::Value>> {
+    async fn handle_progress_notification(
+        &self,
+        params: ProgressNotification,
+    ) -> Result<Option<serde_json::Value>> {
         tracing::debug!("📊 MCP进度通知: {}%", params.progress);
         Ok(None)
     }
 
     /// 处理取消通知
-    async fn handle_cancelled_notification(&mut self, params: CancelledNotification) -> Result<Option<serde_json::Value>> {
+    async fn handle_cancelled_notification(
+        &mut self,
+        params: CancelledNotification,
+    ) -> Result<Option<serde_json::Value>> {
         tracing::info!("❌ 收到取消通知: {}", params.reason);
         Ok(None)
     }
 
     /// 处理日志消息
-    async fn handle_logging_message(&self, params: LoggingMessage) -> Result<Option<serde_json::Value>> {
+    async fn handle_logging_message(
+        &self,
+        params: LoggingMessage,
+    ) -> Result<Option<serde_json::Value>> {
         match params.level {
             LogLevel::Error | LogLevel::Critical => {
                 tracing::error!("🔴 MCP日志: {:?}", params.data);
@@ -210,4 +238,4 @@ impl Default for MCPProtocol {
     fn default() -> Self {
         Self::new()
     }
-} 
+}

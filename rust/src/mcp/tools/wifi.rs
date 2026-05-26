@@ -1,7 +1,7 @@
-use std::process::Command;
-use serde_json::Value;
 use crate::mcp::types::{Content, Tool, ToolsCallResult};
 use crate::types::Result;
+use serde_json::Value;
+use std::process::Command;
 
 pub fn get_tool() -> Tool {
     Tool {
@@ -20,51 +20,61 @@ fn get_wifi_info() -> std::io::Result<Value> {
         let output = Command::new("/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport")
             .arg("-I")
             .output()?;
-        
+
         let output_str = String::from_utf8_lossy(&output.stdout);
         let mut info = serde_json::Map::new();
-        
+
         for line in output_str.lines() {
             if let Some((key, value)) = line.split_once(':') {
                 let key = key.trim();
                 let value = value.trim();
-                
+
                 match key {
                     "SSID" => info.insert("ssid".to_string(), Value::String(value.to_string())),
-                    "agrCtlRSSI" => info.insert("signal_strength".to_string(), Value::String(value.to_string())),
-                    "lastTxRate" => info.insert("tx_rate".to_string(), Value::String(value.to_string())),
+                    "agrCtlRSSI" => info.insert(
+                        "signal_strength".to_string(),
+                        Value::String(value.to_string()),
+                    ),
+                    "lastTxRate" => {
+                        info.insert("tx_rate".to_string(), Value::String(value.to_string()))
+                    }
                     "MCS" => info.insert("mcs".to_string(), Value::String(value.to_string())),
                     _ => None,
                 };
             }
         }
-        
+
         Ok(Value::Object(info))
     }
-    
+
     #[cfg(target_os = "windows")]
     {
         let output = Command::new("netsh")
             .args(["wlan", "show", "interfaces"])
             .output()?;
-            
+
         let output_str = String::from_utf8_lossy(&output.stdout);
         let mut info = serde_json::Map::new();
-        
+
         for line in output_str.lines() {
             if let Some((key, value)) = line.split_once(':') {
                 let key = key.trim();
                 let value = value.trim();
-                
+
                 match key {
                     "SSID" => info.insert("ssid".to_string(), Value::String(value.to_string())),
-                    "Signal" => info.insert("signal_strength".to_string(), Value::String(value.to_string())),
-                    "Transmit rate (Mbps)" => info.insert("tx_rate".to_string(), Value::String(value.to_string())),
+                    "Signal" => info.insert(
+                        "signal_strength".to_string(),
+                        Value::String(value.to_string()),
+                    ),
+                    "Transmit rate (Mbps)" => {
+                        info.insert("tx_rate".to_string(), Value::String(value.to_string()))
+                    }
                     _ => None,
                 };
             }
         }
-        
+
         Ok(Value::Object(info))
     }
 }
@@ -75,7 +85,10 @@ pub async fn handle() -> Result<ToolsCallResult> {
             tracing::info!("📶 获取WiFi状态成功");
             Ok(ToolsCallResult {
                 content: vec![Content::Text {
-                    text: format!("📶 WiFi状态:\n{}", serde_json::to_string_pretty(&wifi_info)?),
+                    text: format!(
+                        "📶 WiFi状态:\n{}",
+                        serde_json::to_string_pretty(&wifi_info)?
+                    ),
                 }],
                 is_error: None,
             })
@@ -90,4 +103,4 @@ pub async fn handle() -> Result<ToolsCallResult> {
             })
         }
     }
-} 
+}

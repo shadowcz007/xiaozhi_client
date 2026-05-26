@@ -1,13 +1,13 @@
-use cpal::{Device, Stream, StreamConfig, SampleRate};
+use crate::types::{ClientError, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use opus::{Decoder, Channels};
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
+use cpal::{Device, SampleRate, Stream, StreamConfig};
+use opus::{Channels, Decoder};
+use rubato::{InterpolationParameters, InterpolationType, Resampler, SincFixedIn, WindowFunction};
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::time;
-use rubato::{Resampler, SincFixedIn, InterpolationType, InterpolationParameters, WindowFunction};
-use crate::types::{Result, ClientError};
 
 struct PlayerBuffer {
     deque: VecDeque<f32>,
@@ -38,7 +38,7 @@ unsafe impl Sync for NodeAudioPlayer {}
 
 impl NodeAudioPlayer {
     /// 创建新的音频播放器
-    /// 
+    ///
     /// # Arguments
     /// * `sample_rate` - 采样率（Hz）
     /// * `channels` - 声道数
@@ -52,7 +52,12 @@ impl NodeAudioPlayer {
         let decoder = Decoder::new(sample_rate, opus_channels)?;
         let frame_size = (sample_rate as f64 * 0.02) as usize; // 20ms frames
 
-        tracing::info!("🔊 创建新的音频播放器: 采样率={}Hz, 声道={}, 帧大小={}", sample_rate, channels, frame_size);
+        tracing::info!(
+            "🔊 创建新的音频播放器: 采样率={}Hz, 声道={}, 帧大小={}",
+            sample_rate,
+            channels,
+            frame_size
+        );
 
         let mut player = Self {
             decoder: Arc::new(Mutex::new(decoder)),
@@ -65,42 +70,45 @@ impl NodeAudioPlayer {
             sample_rate,
             channels,
             frame_size,
-            buffer_duration_ms: 200,   // 初始缓冲时长（毫秒）
-            max_buffer_duration_ms: 2000,  // 最大缓冲时长（毫秒）
+            buffer_duration_ms: 200,      // 初始缓冲时长（毫秒）
+            max_buffer_duration_ms: 2000, // 最大缓冲时长（毫秒）
             last_data_time: Arc::new(Mutex::new(Instant::now())),
             playback_finished_callback: None,
             debug_counter: Arc::new(Mutex::new(0)),
-            device_channels: 2, // 默认值，会在配置时更新
+            device_channels: 2,        // 默认值，会在配置时更新
             device_sample_rate: 48000, // 默认值，会在配置时更新
             resampler: Arc::new(Mutex::new(None)),
         };
 
         // 记录设备状态
         let host = cpal::default_host();
-        let device = host.default_output_device()
+        let device = host
+            .default_output_device()
             .ok_or_else(|| ClientError::AudioError("未找到输出设备".to_string()))?;
         player.log_device_status(&device)?;
 
         // 获取设备配置
         let config = player.get_optimal_config(&device)?;
-        
+
         Ok(player)
     }
 
     /// 获取默认输出设备
     pub fn get_default_output_device() -> Result<Device> {
         let host = cpal::default_host();
-        let device = host.default_output_device()
+        let device = host
+            .default_output_device()
             .ok_or_else(|| ClientError::AudioError("未找到默认输出设备".to_string()))?;
 
         // 打印设备信息
         tracing::info!("🔊 默认输出设备名称: {:?}", device.name());
-        
+
         // 打印支持的配置
         if let Ok(supported_configs) = device.supported_output_configs() {
             tracing::info!("🔊 设备支持的配置:");
             for config in supported_configs {
-                tracing::info!("  - 采样率范围: {}Hz - {}Hz", 
+                tracing::info!(
+                    "  - 采样率范围: {}Hz - {}Hz",
                     config.min_sample_rate().0,
                     config.max_sample_rate().0
                 );
@@ -131,8 +139,12 @@ impl NodeAudioPlayer {
     /// 处理音频数据
     pub fn process_audio_data(&mut self, opus_data: Vec<u8>) -> Result<()> {
         // 步骤 1: 记录输入的 Opus 数据信息
-        tracing::info!("🎵 [步骤1] 接收到 Opus 数据: 大小={} 字节, 目标采样率={}Hz, 目标声道={}", 
-            opus_data.len(), self.sample_rate, self.channels);
+        tracing::info!(
+            "🎵 [步骤1] 接收到 Opus 数据: 大小={} 字节, 目标采样率={}Hz, 目标声道={}",
+            opus_data.len(),
+            self.sample_rate,
+            self.channels
+        );
 
         // 如果设置了停止接收标志，直接返回
         if self.stop_receiving.load(Ordering::Relaxed) {
@@ -147,17 +159,21 @@ impl NodeAudioPlayer {
 
         // 步骤 2: Opus 解码为 PCM
         let pcm_data = {
-            let mut decoder_guard = self.decoder.lock().map_err(|_| {
-                ClientError::AudioError("获取解码器锁失败".to_string())
-            })?;
+            let mut decoder_guard = self
+                .decoder
+                .lock()
+                .map_err(|_| ClientError::AudioError("获取解码器锁失败".to_string()))?;
 
             let mut output_buffer = vec![0i16; self.frame_size];
-            
+
             match decoder_guard.decode(&opus_data, &mut output_buffer, false) {
                 Ok(len) => {
                     output_buffer.truncate(len);
-                    tracing::info!("🎵 [步骤2] Opus解码完成: PCM长度={}, 采样率={}Hz", 
-                        len, self.sample_rate);
+                    tracing::info!(
+                        "🎵 [步骤2] Opus解码完成: PCM长度={}, 采样率={}Hz",
+                        len,
+                        self.sample_rate
+                    );
                     if len == 0 {
                         tracing::warn!("🔊 解码返回0长度，生成静音帧");
                         vec![0i16; self.frame_size]
@@ -173,20 +189,21 @@ impl NodeAudioPlayer {
         };
 
         // 步骤 3: PCM (i16) 转换为 f32
-        let pcm_f32: Vec<f32> = pcm_data.iter()
-            .map(|&x| x as f32 / 32768.0)
-            .collect();
-        
-        tracing::info!("🎵 [步骤3] PCM转换为f32: 数据点数={}, 最大值={:.3}, 最小值={:.3}", 
+        let pcm_f32: Vec<f32> = pcm_data.iter().map(|&x| x as f32 / 32768.0).collect();
+
+        tracing::info!(
+            "🎵 [步骤3] PCM转换为f32: 数据点数={}, 最大值={:.3}, 最小值={:.3}",
             pcm_f32.len(),
             pcm_f32.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
-            pcm_f32.iter().fold(f32::INFINITY, |a, &b| a.min(b)));
+            pcm_f32.iter().fold(f32::INFINITY, |a, &b| a.min(b))
+        );
 
         // 步骤 4: 重采样处理
         let resampled_data = {
-            let mut resampler_guard = self.resampler.lock().map_err(|_| {
-                ClientError::AudioError("获取重采样器锁失败".to_string())
-            })?;
+            let mut resampler_guard = self
+                .resampler
+                .lock()
+                .map_err(|_| ClientError::AudioError("获取重采样器锁失败".to_string()))?;
 
             // 如果重采样器还没有初始化，创建一个新的
             if resampler_guard.is_none() {
@@ -197,37 +214,49 @@ impl NodeAudioPlayer {
                     oversampling_factor: 512,
                     window: WindowFunction::Blackman,
                 };
-                
-                tracing::info!("🎵 创建重采样器: {}Hz -> {}Hz, sinc_len={}, oversampling={}", 
-                    self.sample_rate, self.device_sample_rate, 
-                    params.sinc_len, params.oversampling_factor);
 
-                *resampler_guard = Some(SincFixedIn::<f32>::new(
-                    self.device_sample_rate as f64 / self.sample_rate as f64,
-                    2.0,
-                    params,
-                    self.frame_size,
-                    1, // 单声道处理
-                ).map_err(|e| ClientError::AudioError(format!("创建重采样器失败: {}", e)))?);
+                tracing::info!(
+                    "🎵 创建重采样器: {}Hz -> {}Hz, sinc_len={}, oversampling={}",
+                    self.sample_rate,
+                    self.device_sample_rate,
+                    params.sinc_len,
+                    params.oversampling_factor
+                );
+
+                *resampler_guard = Some(
+                    SincFixedIn::<f32>::new(
+                        self.device_sample_rate as f64 / self.sample_rate as f64,
+                        2.0,
+                        params,
+                        self.frame_size,
+                        1, // 单声道处理
+                    )
+                    .map_err(|e| ClientError::AudioError(format!("创建重采样器失败: {}", e)))?,
+                );
             }
 
             let resampler = resampler_guard.as_mut().unwrap();
             let waves_in = vec![pcm_f32.clone()];
-            let waves_out = resampler.process(&waves_in, None).map_err(|e| {
-                ClientError::AudioError(format!("重采样处理失败: {}", e))
-            })?;
+            let waves_out = resampler
+                .process(&waves_in, None)
+                .map_err(|e| ClientError::AudioError(format!("重采样处理失败: {}", e)))?;
 
             let resampled = waves_out.into_iter().next().unwrap_or_default();
-            tracing::info!("🎵 [步骤4] 重采样完成: 输入={} ({}Hz) -> 输出={} ({}Hz), 比率={:.2}", 
-                pcm_f32.len(), self.sample_rate,
-                resampled.len(), self.device_sample_rate,
-                self.device_sample_rate as f32 / self.sample_rate as f32);
-            
+            tracing::info!(
+                "🎵 [步骤4] 重采样完成: 输入={} ({}Hz) -> 输出={} ({}Hz), 比率={:.2}",
+                pcm_f32.len(),
+                self.sample_rate,
+                resampled.len(),
+                self.device_sample_rate,
+                self.device_sample_rate as f32 / self.sample_rate as f32
+            );
+
             resampled
         };
 
         // 步骤 5: 声道转换（单声道到多声道）
-        let mut multi_channel_data = Vec::with_capacity(resampled_data.len() * self.device_channels as usize);
+        let mut multi_channel_data =
+            Vec::with_capacity(resampled_data.len() * self.device_channels as usize);
         for sample in resampled_data.iter() {
             // 复制同一个样本到所有声道
             for _ in 0..self.device_channels {
@@ -235,28 +264,40 @@ impl NodeAudioPlayer {
             }
         }
 
-        tracing::info!("🎵 [步骤5] 声道转换完成: {} -> {} 声道, 最终数据点数={}", 
-            1, self.device_channels, multi_channel_data.len());
+        tracing::info!(
+            "🎵 [步骤5] 声道转换完成: {} -> {} 声道, 最终数据点数={}",
+            1,
+            self.device_channels,
+            multi_channel_data.len()
+        );
 
         // 添加到缓冲区
         {
-            let mut buffer_guard = self.audio_buffer.lock().map_err(|_| {
-                ClientError::AudioError("获取音频缓冲区锁失败".to_string())
-            })?;
+            let mut buffer_guard = self
+                .audio_buffer
+                .lock()
+                .map_err(|_| ClientError::AudioError("获取音频缓冲区锁失败".to_string()))?;
 
-            let max_buffer_samples = (self.device_sample_rate as usize * self.device_channels as usize * self.max_buffer_duration_ms) / 1000;
+            let max_buffer_samples = (self.device_sample_rate as usize
+                * self.device_channels as usize
+                * self.max_buffer_duration_ms)
+                / 1000;
             let current_buffer_samples = buffer_guard.deque.len();
 
-            tracing::info!("📊 缓冲区状态: 已缓冲 {} / {} 样本 ({} / {} ms)",
-                current_buffer_samples, max_buffer_samples,
-                (current_buffer_samples * 1000) / (self.device_sample_rate as usize * self.device_channels as usize).max(1),
+            tracing::info!(
+                "📊 缓冲区状态: 已缓冲 {} / {} 样本 ({} / {} ms)",
+                current_buffer_samples,
+                max_buffer_samples,
+                (current_buffer_samples * 1000)
+                    / (self.device_sample_rate as usize * self.device_channels as usize).max(1),
                 self.max_buffer_duration_ms
             );
 
             // 检查缓冲区是否过满
             if current_buffer_samples >= max_buffer_samples {
                 tracing::warn!("⚠️ 音频缓冲区过满，丢弃旧数据以腾出空间");
-                let drain_count = current_buffer_samples - max_buffer_samples + multi_channel_data.len();
+                let drain_count =
+                    current_buffer_samples - max_buffer_samples + multi_channel_data.len();
                 let len = buffer_guard.deque.len();
                 buffer_guard.deque.drain(..std::cmp::min(drain_count, len));
             }
@@ -266,24 +307,30 @@ impl NodeAudioPlayer {
 
         // 更新最后接收数据时间
         {
-            let mut last_time_guard = self.last_data_time.lock().map_err(|_| {
-                ClientError::AudioError("获取时间锁失败".to_string())
-            })?;
+            let mut last_time_guard = self
+                .last_data_time
+                .lock()
+                .map_err(|_| ClientError::AudioError("获取时间锁失败".to_string()))?;
             *last_time_guard = Instant::now();
         }
 
         // 如果还没开始播放且缓冲区足够大，开始播放
         if !self.is_playing.load(Ordering::Relaxed) {
             let buffer_len_ms = {
-                let buffer_guard = self.audio_buffer.lock().map_err(|_| {
-                    ClientError::AudioError("获取音频缓冲区锁失败".to_string())
-                })?;
-                (buffer_guard.deque.len() * 1000) / (self.device_sample_rate as usize * self.device_channels as usize).max(1)
+                let buffer_guard = self
+                    .audio_buffer
+                    .lock()
+                    .map_err(|_| ClientError::AudioError("获取音频缓冲区锁失败".to_string()))?;
+                (buffer_guard.deque.len() * 1000)
+                    / (self.device_sample_rate as usize * self.device_channels as usize).max(1)
             };
 
             if buffer_len_ms >= self.buffer_duration_ms {
-                tracing::info!("▶️ 缓冲区已满足播放条件 ({} / {} ms), 开始播放",
-                    buffer_len_ms, self.buffer_duration_ms);
+                tracing::info!(
+                    "▶️ 缓冲区已满足播放条件 ({} / {} ms), 开始播放",
+                    buffer_len_ms,
+                    self.buffer_duration_ms
+                );
                 self.start_playback()?;
             }
         }
@@ -312,10 +359,13 @@ impl NodeAudioPlayer {
         let is_playing = Arc::clone(&self.is_playing);
         let last_data_time = Arc::clone(&self.last_data_time);
 
-        let stream = self.create_stream::<f32>(&device, &config, audio_buffer, is_playing, last_data_time)?;
+        let stream =
+            self.create_stream::<f32>(&device, &config, audio_buffer, is_playing, last_data_time)?;
 
-        stream.play().map_err(|e| ClientError::AudioError(format!("启动音频流失败: {}", e)))?;
-        
+        stream
+            .play()
+            .map_err(|e| ClientError::AudioError(format!("启动音频流失败: {}", e)))?;
+
         self._stream = Some(stream);
         self.is_playing.store(true, Ordering::Relaxed);
 
@@ -328,26 +378,35 @@ impl NodeAudioPlayer {
 
     /// 获取最佳配置
     fn get_optimal_config(&mut self, device: &Device) -> Result<StreamConfig> {
-        let default_config = device.default_output_config()
+        let default_config = device
+            .default_output_config()
             .map_err(|e| ClientError::AudioError(format!("获取默认配置失败: {}", e)))?;
-        
+
         tracing::info!("🔊 音频设备信息:");
-        tracing::info!("  设备名称: {}", device.name()
-            .map_err(|e| ClientError::AudioError(format!("获取设备名称失败: {}", e)))?);
-        tracing::info!("  默认配置: 采样率={}Hz, 声道数={}, 格式={:?}", 
+        tracing::info!(
+            "  设备名称: {}",
+            device
+                .name()
+                .map_err(|e| ClientError::AudioError(format!("获取设备名称失败: {}", e)))?
+        );
+        tracing::info!(
+            "  默认配置: 采样率={}Hz, 声道数={}, 格式={:?}",
             default_config.sample_rate().0,
             default_config.channels(),
-            default_config.sample_format());
+            default_config.sample_format()
+        );
 
         // 获取所有支持的配置
         if let Ok(supported_configs) = device.supported_output_configs() {
             tracing::info!("  支持的配置:");
             for config in supported_configs {
-                tracing::info!("    - 采样率: {}Hz-{}Hz, 声道={}, 格式={:?}",
+                tracing::info!(
+                    "    - 采样率: {}Hz-{}Hz, 声道={}, 格式={:?}",
                     config.min_sample_rate().0,
                     config.max_sample_rate().0,
                     config.channels(),
-                    config.sample_format());
+                    config.sample_format()
+                );
             }
         }
 
@@ -364,19 +423,25 @@ impl NodeAudioPlayer {
 
     fn log_device_status(&self, device: &Device) -> Result<()> {
         tracing::info!("🎵 音频设备状态:");
-        tracing::info!("  名称: {}", device.name()
-            .map_err(|e| ClientError::AudioError(format!("获取设备名称失败: {}", e)))?);
+        tracing::info!(
+            "  名称: {}",
+            device
+                .name()
+                .map_err(|e| ClientError::AudioError(format!("获取设备名称失败: {}", e)))?
+        );
         tracing::info!("  当前采样率: {}Hz", self.device_sample_rate);
         tracing::info!("  当前声道数: {}", self.device_channels);
-        
+
         if let Ok(supported_configs) = device.supported_output_configs() {
             tracing::info!("  支持的配置:");
             for config in supported_configs {
-                tracing::info!("    - 采样率: {}Hz-{}Hz, 声道={}, 格式={:?}",
+                tracing::info!(
+                    "    - 采样率: {}Hz-{}Hz, 声道={}, 格式={:?}",
                     config.min_sample_rate().0,
                     config.max_sample_rate().0,
                     config.channels(),
-                    config.sample_format());
+                    config.sample_format()
+                );
             }
         }
         Ok(())
@@ -403,14 +468,14 @@ impl NodeAudioPlayer {
     {
         let debug_counter = Arc::clone(&self.debug_counter);
         let stop_receiving = Arc::clone(&self.stop_receiving);
-        
+
         let stream = device
             .build_output_stream(
                 config,
                 move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
                     let mut counter = debug_counter.lock().unwrap();
                     *counter += 1;
-                    
+
                     if *counter % 100 == 0 {
                         tracing::debug!("🔊 音频回调 #{}: 请求数据长度={}", counter, data.len());
                     }
@@ -479,13 +544,13 @@ impl NodeAudioPlayer {
         let is_playing = Arc::clone(&self.is_playing);
         let last_data_time = Arc::clone(&self.last_data_time);
         let audio_buffer = Arc::clone(&self.audio_buffer);
-        
+
         tokio::spawn(async move {
             let mut interval = time::interval(Duration::from_millis(100));
-            
+
             loop {
                 interval.tick().await;
-                
+
                 if !is_playing.load(Ordering::Relaxed) {
                     break;
                 }
@@ -494,7 +559,8 @@ impl NodeAudioPlayer {
                 let should_stop = {
                     if let Ok(last_time_guard) = last_data_time.lock() {
                         if let Ok(buffer_guard) = audio_buffer.lock() {
-                            buffer_guard.deque.is_empty() && last_time_guard.elapsed() > Duration::from_millis(1000)
+                            buffer_guard.deque.is_empty()
+                                && last_time_guard.elapsed() > Duration::from_millis(1000)
                         } else {
                             false
                         }
@@ -551,7 +617,10 @@ impl NodeAudioPlayer {
     pub fn get_buffer_status(&self) -> (usize, usize) {
         if let Ok(buffer_guard) = self.audio_buffer.lock() {
             let current_samples = buffer_guard.deque.len();
-            let max_samples = (self.device_sample_rate as usize * self.device_channels as usize * self.max_buffer_duration_ms) / 1000;
+            let max_samples = (self.device_sample_rate as usize
+                * self.device_channels as usize
+                * self.max_buffer_duration_ms)
+                / 1000;
             (current_samples, max_samples)
         } else {
             (0, 0)
@@ -585,4 +654,4 @@ mod tests {
         let player = NodeAudioPlayer::new(24000, 5);
         assert!(player.is_err());
     }
-} 
+}
